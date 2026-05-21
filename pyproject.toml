@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xninja"
+version = "0.1.0"
+description = "Claude Code-style CLI harness for the Subnet 66 ninja agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "unarbos" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.0",
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+xninja = "xninja.cli:main"
+
+[tool.setuptools.package-data]
+xninja = ["bundled_agent/agent.py", "bundled_agent/metadata.json"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
