@@ -301,20 +301,53 @@ def _observation_section(text: str, name: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _line_count(text: str) -> int:
+    return 0 if not text else len(text.splitlines())
+
+
+def _command_head(command: str) -> str:
+    return command.strip().splitlines()[0] if command.strip() else "(unknown command)"
+
+
+def _looks_like_inspection_command(command: str) -> bool:
+    head = _command_head(command)
+    return bool(re.match(r"^(cat|sed|head|tail|grep|rg|find|ls|git (show|log|diff|status))\b", head))
+
+
+def _looks_like_test_command(command: str) -> bool:
+    head = _command_head(command)
+    return any(token in head for token in ("pytest", "npm test", "pnpm test", "yarn test", "go test", "cargo test"))
+
+
+def _render_success_output(command: str, stdout: str) -> List[str]:
+    if command.strip().startswith("<edit "):
+        return ["  " + _clip_stream_text(stdout, 500).replace("\n", "\n  ")] if stdout else []
+    if _looks_like_test_command(command):
+        tail = "\n".join(stdout.splitlines()[-8:])
+        return ["  " + _clip_stream_text(tail, 800).replace("\n", "\n  ")] if tail else []
+    if _looks_like_inspection_command(command):
+        lines = _line_count(stdout)
+        chars = len(stdout)
+        return [f"  read {lines} lines ({chars} chars)"] if stdout else []
+    if _line_count(stdout) <= 4 and len(stdout) <= 500:
+        return ["  " + stdout.strip().replace("\n", "\n  ")] if stdout.strip() else []
+    return [f"  output hidden: {_line_count(stdout)} lines ({len(stdout)} chars)"]
+
+
 def _render_observation(item: str) -> List[str]:
     command = _observation_section(item, "COMMAND")
     exit_code = _observation_section(item, "EXIT_CODE")
     stdout = _observation_section(item, "STDOUT")
     stderr = _observation_section(item, "STDERR")
-    header = f"Result: exit {exit_code or '?'}"
-    if command:
-        header += f" from {command.splitlines()[0]}"
-    lines = [header]
+    command_head = _command_head(command)
+    lines = [f"Result: exit {exit_code or '?'} from {command_head}"]
+    if exit_code == "0" and not stderr.strip():
+        lines.extend(_render_success_output(command, stdout))
+        return lines
     output = stderr or stdout
     if output:
-        lines.append("  " + _clip_stream_text(output).replace("\n", "\n  "))
+        lines.append("  " + _clip_stream_text(output, 1200).replace("\n", "\n  "))
     return lines
-
 
 def _render_model_response(item: str) -> List[str]:
     body = item.split("MODEL_RESPONSE:", 1)[1] if "MODEL_RESPONSE:" in item else item
