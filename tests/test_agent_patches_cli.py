@@ -135,6 +135,15 @@ def test_printable_agent_logs_formats_none_and_text():
     assert printable_agent_logs("\nstep 1\n") == "step 1"
 
 
+def test_cli_accepts_raw_logs_flag(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "--raw-logs", "--help"])
+    captured = capsys.readouterr()
+
+    assert exc.value.code == 0
+    assert "--raw-logs" in captured.out
+
+
 def test_cli_help_smoke(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--help"])

@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="OpenRouter model id")
     parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
     parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
+    parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="run one task")
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--model", help="OpenRouter model id")
     run_parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
     run_parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
+    run_parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
 
     config_parser = subparsers.add_parser("config", help="configure OpenRouter and defaults")
     config_parser.add_argument("--show", action="store_true", help="show current config with secrets redacted")
@@ -129,6 +131,7 @@ def run_task(
     explicit_model: str | None,
     agent_ref: str | None,
     apply_requested: bool,
+    raw_logs: bool = False,
 ) -> int:
     repo_path = repo.expanduser().resolve()
     if not repo_path.exists():
@@ -151,11 +154,11 @@ def run_task(
     print(f"Running ninja agent from {source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}")
     print(f"Model: {model}")
     stream_logs = stream_agent_logs_enabled(source)
-    print("Thinking" + (" trace:" if stream_logs else "..."))
+    print("Working trace:" if stream_logs else "Working...")
 
     previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
     if stream_logs:
-        os.environ["XNINJA_STREAM_LOGS"] = "1"
+        os.environ["XNINJA_STREAM_LOGS"] = "raw" if raw_logs else "rendered"
     try:
         with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
             work_repo = copy_repo_for_agent(repo_path, Path(work_root))
@@ -204,7 +207,7 @@ def interactive(args: argparse.Namespace) -> int:
             return 0
         if not task:
             continue
-        code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.apply)
+        code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.apply, args.raw_logs)
         if code not in {0, 1}:
             return code
 
@@ -236,9 +239,9 @@ def dispatch(args: argparse.Namespace) -> int:
         if args.agent_command == "update":
             return agent_update(args)
     if args.command == "run":
-        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply)
+        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply, args.raw_logs)
     if args.prompt:
-        return run_task(Path(args.repo), " ".join(args.prompt), args.model, args.agent_ref, args.apply)
+        return run_task(Path(args.repo), " ".join(args.prompt), args.model, args.agent_ref, args.apply, args.raw_logs)
     return interactive(args)
 
 

@@ -262,35 +262,94 @@ def _safe_join_logs(logs: List[str]) -> str:
 class _StreamingLogList(list):
     def append(self, item: str) -> None:
         super().append(item)
-        if item:
+        if not item:
+            return
+        mode = os.environ.get("XNINJA_STREAM_LOGS")
+        if mode == "raw":
             print(item, flush=True)
+            return
+        for line in _render_log_item(item):
+            print(line, flush=True)
 
 
-def _new_logs() -> List[str]:
-    if os.environ.get("XNINJA_STREAM_LOGS") == "1":
-        return _StreamingLogList()
+def _clip_stream_text(text: str, max_chars: int = 1200) -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    return stripped[:max_chars].rstrip() + f"\n    ... {len(stripped) - max_chars} chars hidden"
+
+
+def _extract_tag_text(text: str, tag: str) -> List[str]:
+    pattern = rf"<{tag}\b[^>]*>\s*(.*?)\s*</{tag}>"
+    return [match.strip() for match in re.findall(pattern, text, re.IGNORECASE | re.DOTALL) if match.strip()]
+
+
+def _extract_edit_summaries(text: str) -> List[str]:
+    edits: List[str] = []
+    for attrs, _body in re.findall(r"<edit\b([^>]*)>\s*(.*?)\s*</edit>", text, re.IGNORECASE | re.DOTALL):
+        path_match = re.search(r'path="([^"]+)"', attrs)
+        op_match = re.search(r'op="([^"]+)"', attrs)
+        path = path_match.group(1) if path_match else "(unknown path)"
+        op = op_match.group(1) if op_match else "edit"
+        edits.append(f"Edit: {op} {path}")
+    return edits
+
+
+def _observation_section(text: str, name: str) -> str:
+    pattern = rf"{name}:\n(.*?)(?:\n\n[A-Z_]+:|\Z)"
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _render_observation(item: str) -> List[str]:
+    command = _observation_section(item, "COMMAND")
+    exit_code = _observation_section(item, "EXIT_CODE")
+    stdout = _observation_section(item, "STDOUT")
+    stderr = _observation_section(item, "STDERR")
+    header = f"Result: exit {exit_code or '?'}"
+    if command:
+        header += f" from {command.splitlines()[0]}"
+    lines = [header]
+    output = stderr or stdout
+    if output:
+        lines.append("  " + _clip_stream_text(output).replace("\n", "\n  "))
+    return lines
+
+
+def _render_model_response(item: str) -> List[str]:
+    body = item.split("MODEL_RESPONSE:", 1)[1] if "MODEL_RESPONSE:" in item else item
+    lines: List[str] = []
+    for plan in _extract_tag_text(body, "plan"):
+        lines.append("Plan:")
+        lines.append("  " + _clip_stream_text(plan).replace("\n", "\n  "))
+    lines.extend(_extract_edit_summaries(body))
+    for command in _extract_tag_text(body, "command"):
+        lines.append("Tool: " + command.splitlines()[0])
+    for final in _extract_tag_text(body, "final"):
+        lines.append("Final: " + _clip_stream_text(final).replace("\n", " "))
+    if not lines:
+        lines.append("Model response received.")
+    return lines
+
+
+def _render_log_item(item: str) -> List[str]:
+    stripped = item.strip()
+    if not stripped:
+        return []
+    step_match = re.search(r"===== STEP (\d+) =====", stripped)
+    if step_match:
+        return [f"Step {step_match.group(1)}"]
+    if stripped.startswith("MODEL_WAIT:"):
+        return [stripped.replace("MODEL_WAIT:", "Waiting for model:", 1).strip()]
+    if "MODEL_RESPONSE:" in stripped:
+        return _render_model_response(stripped)
+    if "OBSERVATION" in stripped and "COMMAND:" in stripped:
+        return _render_observation(stripped)
+    if "QUEUED" in stripped or stripped.startswith(("AUTO_STOP", "PATCH_READY", "PATCH_RETURN", "FINAL_SUMMARY")):
+        return [_clip_stream_text(stripped).replace("\n", " | ")]
+    if stripped.startswith("MODEL_ERROR"):
+        return [_clip_stream_text(stripped).replace("\n", " | ")]
     return []
-
-
-def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Optional[threading.Event]:
-    if os.environ.get("XNINJA_STREAM_LOGS") != "1":
-        return None
-    stop = threading.Event()
-
-    def beat() -> None:
-        waited = 0
-        while not stop.wait(5):
-            waited += 5
-            logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
-
-    threading.Thread(target=beat, daemon=True).start()
-    return stop
-
-
-def _stop_model_wait_heartbeat(stop: Optional[threading.Event]) -> None:
-    if stop is not None:
-        stop.set()
-
 
 def _message_chars(messages: List[Dict[str, str]]) -> int:
     return sum(len(message.get("content") or "") + 32 for message in messages)
