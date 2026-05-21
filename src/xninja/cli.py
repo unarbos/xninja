@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal, Sequence
 
+from xninja import __version__
 from xninja.agent import bundled_agent_source, resolve_agent_source, run_agent, update_cached_agent
 from xninja.config import (
     XninjaConfig,
@@ -148,6 +149,7 @@ def add_run_options(parser: argparse.ArgumentParser, repo_help: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
+    parser.add_argument("--version", action="version", version=f"xninja {__version__}")
     add_run_options(parser, "repository path for the task")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -173,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_prompt_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
+    parser.add_argument("--version", action="version", version=f"xninja {__version__}")
     add_run_options(parser, "repository path for the task")
     parser.add_argument("prompt", nargs="*", help="one-shot task prompt")
     return parser

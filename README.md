@@ -28,7 +28,7 @@ pip install xninja
 Verify the installation:
 
 ```bash
-xninja --help
+xninja --version
 ```
 
 ### From source
@@ -44,7 +44,7 @@ python -m pip install -e .
 Verify the installation:
 
 ```bash
-xninja --help
+xninja --version
 ```
 
 ## Configure

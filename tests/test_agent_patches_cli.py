@@ -280,3 +280,12 @@ def test_failed_patch_apply_message_is_clear(monkeypatch, tmp_path, capsys):
 
     assert code != 0
     assert "Patch did not apply cleanly" in captured.err
+
+
+def test_cli_version_smoke(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    captured = capsys.readouterr()
+
+    assert exc.value.code == 0
+    assert captured.out.strip().startswith("xninja ")
