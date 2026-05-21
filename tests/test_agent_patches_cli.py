@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, run_agent
-from xninja.cli import copy_repo_for_agent, main, printable_agent_logs, stream_agent_logs_enabled
+from xninja.cli import copy_repo_for_agent, main, meta, printable_agent_logs, stream_agent_logs_enabled, style
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
 
@@ -120,6 +120,20 @@ def solve(repo_path, issue, model, api_base, api_key):
     )
 
     assert "hello fake" in patch_text(result)
+
+
+def test_style_respects_no_color(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    assert style("hello", "green") == "hello"
+    assert meta("model", "test") == "model: test"
+
+
+def test_style_adds_ansi_when_enabled(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    assert style("hello", "green").startswith("\033[32m")
 
 
 def test_stream_agent_logs_enabled_for_bundled_source(tmp_path):

@@ -24,6 +24,53 @@ from xninja.patches import apply_patch, patch_summary, patch_text, repo_is_git_w
 from xninja.permissions import apply_patch_allowed, remember_apply_patch
 
 
+ANSI_CODES = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "red": "\033[31m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "cyan": "\033[36m",
+    "magenta": "\033[35m",
+}
+
+
+def color_enabled() -> bool:
+    return os.environ.get("NO_COLOR") is None and os.environ.get("TERM") != "dumb"
+
+
+def style(text: str, *names: str) -> str:
+    if not color_enabled():
+        return text
+    prefix = "".join(ANSI_CODES[name] for name in names if name in ANSI_CODES)
+    return f"{prefix}{text}{ANSI_CODES['reset']}" if prefix else text
+
+
+def meta(name: str, value: object) -> str:
+    return f"{style(name + ':', 'dim')} {value}"
+
+
+def section(title: str) -> None:
+    print("\n" + style(title, "bold", "magenta"))
+
+
+def info(text: str) -> None:
+    print(style(text, "dim"))
+
+
+def warn(text: str) -> None:
+    print(style(text, "yellow"))
+
+
+def success(text: str) -> None:
+    print(style(text, "green"))
+
+
+def error(text: str) -> None:
+    print(style(text, "red"), file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
     parser.add_argument("prompt", nargs="*", help="one-shot task prompt")
@@ -59,12 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def print_config(config: XninjaConfig) -> None:
-    print(f"config: {config_path()}")
-    print(f"openrouter_api_key: {redact_secret(config.openrouter_api_key)}")
-    print(f"default_model: {config.default_model}")
-    print(f"allow_apply_patch: {config.allow_apply_patch}")
+    print(meta("config", config_path()))
+    print(meta("openrouter_api_key", redact_secret(config.openrouter_api_key)))
+    print(meta("default_model", config.default_model))
+    print(meta("allow_apply_patch", config.allow_apply_patch))
     allowed = ", ".join(config.allowed_shell_commands) or "(none)"
-    print(f"allowed_shell_commands: {allowed}")
+    print(meta("allowed_shell_commands", allowed))
 
 
 def configure(args: argparse.Namespace) -> int:
@@ -80,7 +127,7 @@ def configure(args: argparse.Namespace) -> int:
         default_model=default_model or current.default_model,
     )
     path = save_config(updated)
-    print(f"Saved config to {path}")
+    success(f"Saved config to {path}")
     print_config(config_with_env(updated))
     return 0
 
@@ -89,14 +136,14 @@ def list_models(config: XninjaConfig) -> int:
     active = config_with_env(config).default_model
     for choice in RECOMMENDED_MODELS:
         marker = "*" if choice.model_id == active else " "
-        print(f"{marker} {choice.model_id} - {choice.label}: {choice.note}")
+        print(f"{style(marker, 'green')} {style(choice.model_id, 'bold')} {style('-', 'dim')} {choice.label}: {style(choice.note, 'dim')}")
     return 0
 
 
 def prompt_apply(config: XninjaConfig) -> tuple[bool, XninjaConfig]:
     if apply_patch_allowed(config):
         return True, config
-    print("Review the patch above carefully. Only apply it if it is useful.")
+    warn("Review the patch above carefully. Only apply it if it is useful.")
     answer = input("Apply this patch? [y/N/always] ").strip().lower()
     if answer == "always":
         updated = remember_apply_patch(config)
@@ -136,26 +183,27 @@ def run_task(
 ) -> int:
     repo_path = repo.expanduser().resolve()
     if not repo_path.exists():
-        print(f"Repo path does not exist: {repo_path}", file=sys.stderr)
+        error(f"Repo path does not exist: {repo_path}")
         return 2
     if not repo_is_git_worktree(repo_path):
-        print(f"Repo path is not a git worktree: {repo_path}", file=sys.stderr)
+        error(f"Repo path is not a git worktree: {repo_path}")
         return 2
 
     stored_config = load_config()
     config = config_with_env(stored_config)
     api_key = config.openrouter_api_key
     if not api_key:
-        print("OpenRouter API key is not configured. Run `xninja config` first.", file=sys.stderr)
+        error("OpenRouter API key is not configured. Run `xninja config` first.")
         return 2
 
     model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
     source = resolve_agent_source(agent_ref)
-    print(f"Prompt: {task}")
-    print(f"Running ninja agent from {source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}")
-    print(f"Model: {model}")
+    section("xninja")
+    print(meta("prompt", task))
+    print(meta("agent", f"{source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}"))
+    print(meta("model", model))
     stream_logs = stream_agent_logs_enabled(source)
-    print("Working trace:" if stream_logs else "Working...")
+    section("Working Trace") if stream_logs else info("Working...")
 
     previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
     if stream_logs:
@@ -173,20 +221,20 @@ def run_task(
     patch = patch_text(result)
     logs = printable_agent_logs(result.get("logs"))
     if logs and not stream_logs:
-        print("\nThinking trace:")
+        section("Thinking Trace")
         print(logs)
     if not patch.strip():
-        print("\nAgent returned no patch.")
+        warn("\nAgent returned no patch.")
         return 1
 
-    print("\nPatch preview:")
+    section("Patch Preview")
     print(patch_summary(patch))
 
     should_apply = apply_requested
     if not should_apply:
         should_apply, _ = prompt_apply(stored_config)
     if not should_apply:
-        print("Patch left unapplied.")
+        info("Patch left unapplied.")
         return 0
 
     applied = apply_patch(repo_path, patch)
@@ -194,12 +242,13 @@ def run_task(
         print(applied.stdout, end="")
         print(applied.stderr, end="", file=sys.stderr)
         return applied.returncode
-    print("Patch applied.")
+    success("Patch applied.")
     return 0
 
 
 def interactive(args: argparse.Namespace) -> int:
-    print("xninja interactive mode. Enter a task, or Ctrl-D to exit.")
+    section("xninja")
+    info("Interactive mode. Enter a task, or Ctrl-D to exit.")
     while True:
         try:
             task = input("xninja> ").strip()
@@ -215,17 +264,17 @@ def interactive(args: argparse.Namespace) -> int:
 
 def agent_info() -> int:
     source = bundled_agent_source()
-    print(f"path: {source.path}")
+    print(meta("path", source.path))
     for key in ("source_repo", "ref", "commit", "path"):
-        print(f"{key}: {source.metadata.get(key, '')}")
+        print(meta(key, source.metadata.get(key, '')))
     return 0
 
 
 def agent_update(args: argparse.Namespace) -> int:
     source = update_cached_agent(args.ref)
-    print(f"cached: {source.path}")
+    success(f"cached: {source.path}")
     for key, value in source.metadata.items():
-        print(f"{key}: {value}")
+        print(meta(key, value))
     return 0
 
 
@@ -252,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return dispatch(args)
     except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
+        error("\nInterrupted.")
         return 130
 
 
