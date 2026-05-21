@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from xninja.bundled_agent.agent import _render_log_item, _stream_delta_text
+from xninja.bundled_agent.agent import _StreamingLogList, _render_log_item, _stream_delta_text
 
 
 def test_render_model_response_as_transcript_lines():
@@ -124,3 +124,18 @@ def test_rendered_stream_lines_can_be_colored(monkeypatch):
     assert "\033[" in _render_log_item("\n\n===== STEP 2 =====\n")[1]
     assert "\033[" in _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=2s frame=⠙")[0]
     assert "\033[" in _render_log_item("MODEL_RESPONSE:\n<final>Done</final>")[0]
+
+
+def test_streaming_wait_status_rewrites_one_line(monkeypatch, capsys):
+    monkeypatch.setenv("XNINJA_STREAM_LOGS", "rendered")
+    monkeypatch.setenv("XNINJA_COLOR", "never")
+    logs = _StreamingLogList()
+
+    logs.append("MODEL_WAIT: step=1 attempt=1 waited=2s frame=⠋")
+    logs.append("MODEL_WAIT: step=1 attempt=1 waited=4s frame=⠙")
+    logs.append("===== STEP 1 =====")
+
+    captured = capsys.readouterr().out
+    assert "\r⠋ waiting: 2s" in captured
+    assert "\r⠙ waiting: 4s" in captured
+    assert "━━ Step 1 ━━" in captured

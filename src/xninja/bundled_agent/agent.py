@@ -299,6 +299,21 @@ def _render_waiting_line(waited: str, frame: str = "⠋") -> str:
 
 
 class _StreamingLogList(list):
+    def __init__(self) -> None:
+        super().__init__()
+        self._status_width = 0
+
+    def _clear_status(self) -> None:
+        if self._status_width:
+            print("\r" + " " * self._status_width + "\r", end="", flush=True)
+            self._status_width = 0
+
+    def _print_status(self, line: str) -> None:
+        plain_width = len(re.sub(r"\x1b\[[0-9;]*m", "", line))
+        padding = max(0, self._status_width - plain_width)
+        print("\r" + line + " " * padding, end="", flush=True)
+        self._status_width = plain_width
+
     def append(self, item: str) -> None:
         super().append(item)
         if not item:
@@ -307,7 +322,13 @@ class _StreamingLogList(list):
         if mode == "raw":
             print(item, flush=True)
             return
-        for line in _render_log_item(item):
+        lines = _render_log_item(item)
+        if _rendered_log_item_is_status(item):
+            if lines:
+                self._print_status(lines[0])
+            return
+        self._clear_status()
+        for line in lines:
             print(line, flush=True)
 
 
@@ -428,6 +449,10 @@ def _render_model_response(item: str) -> List[str]:
     if not lines:
         lines.append(_stream_style("model response received", "cyan"))
     return lines
+
+def _rendered_log_item_is_status(item: str) -> bool:
+    return item.strip().startswith("MODEL_WAIT:")
+
 
 def _render_log_item(item: str) -> List[str]:
     stripped = item.strip()
