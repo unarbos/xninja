@@ -13,16 +13,38 @@ solve(repo_path, issue, model, api_base, api_key)
 
 ## Install
 
-From this repo:
+### Prerequisites
+
+- Python 3.11 or newer
+- `pip` (bundled with Python)
+- An [OpenRouter](https://openrouter.ai) API key
+
+### From PyPI (recommended)
 
 ```bash
+pip install xninja
+```
+
+Verify the installation:
+
+```bash
+xninja --help
+```
+
+### From source
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/unarbos/xninja.git
+cd xninja
 python -m pip install -e .
 ```
 
-From PyPI, once published:
+Verify the installation:
 
 ```bash
-python -m pip install xninja
+xninja --help
 ```
 
 ## Configure
