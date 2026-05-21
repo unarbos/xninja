@@ -372,6 +372,7 @@ def run_task(
 
     applied = apply_patch(repo_path, patch)
     if applied.returncode != 0:
+        error("Patch did not apply cleanly. No files were changed by xninja.")
         print(applied.stdout, end="")
         print(applied.stderr, end="", file=sys.stderr)
         return applied.returncode

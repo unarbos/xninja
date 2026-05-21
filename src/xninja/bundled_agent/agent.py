@@ -344,13 +344,16 @@ def _extract_tag_text(text: str, tag: str) -> List[str]:
     return [match.strip() for match in re.findall(pattern, text, re.IGNORECASE | re.DOTALL) if match.strip()]
 
 
+def _edit_attr(attrs: str, name: str) -> str:
+    match = re.search(rf"\b{name}=([\"'])(.*?)\1", attrs)
+    return match.group(2).strip() if match else ""
+
+
 def _extract_edit_summaries(text: str) -> List[str]:
     edits: List[str] = []
     for attrs, _body in re.findall(r"<edit\b([^>]*)>\s*(.*?)\s*</edit>", text, re.IGNORECASE | re.DOTALL):
-        path_match = re.search(r'path="([^"]+)"', attrs)
-        op_match = re.search(r'op="([^"]+)"', attrs)
-        path = path_match.group(1) if path_match else "(unknown path)"
-        op = op_match.group(1) if op_match else "edit"
+        path = _edit_attr(attrs, "path") or "(unknown path)"
+        op = _edit_attr(attrs, "op") or "edit"
         edits.append(f"Edit: {op} {path}")
     return edits
 
@@ -458,7 +461,7 @@ def _render_log_item(item: str) -> List[str]:
     stripped = item.strip()
     if not stripped:
         return []
-    step_match = re.search(r"===== STEP (\d+) =====", stripped)
+    step_match = re.fullmatch(r"===== STEP (\d+) =====", stripped)
     if step_match:
         return ["", _render_step_header(step_match.group(1)), ""]
     if stripped.startswith("MODEL_WAIT:"):

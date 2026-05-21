@@ -170,3 +170,29 @@ def test_spinner_heartbeat_uses_fast_frame_interval(monkeypatch):
     _start_model_wait_heartbeat([], 1, 1)
 
     assert sleep_values == [0.12]
+
+
+def test_step_marker_inside_observation_is_not_a_step_header():
+    item = """OBSERVATION 1/1:
+COMMAND:
+python -c test
+
+EXIT_CODE:
+1
+
+STDOUT:
+===== STEP 2 =====
+"""
+
+    assert _render_log_item(item) == [
+        "ran: python -c test (exit 1)",
+        "  ===== STEP 2 =====",
+    ]
+
+
+def test_single_quoted_edit_path_is_rendered():
+    item = """MODEL_RESPONSE:
+<edit path='README.md' op='replace'><old>a</old><new>b</new></edit>
+"""
+
+    assert _render_log_item(item) == ["edit: replace README.md"]

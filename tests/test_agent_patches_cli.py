@@ -254,3 +254,29 @@ def test_color_max_helpers_add_ansi_when_enabled(monkeypatch):
 
     assert "\033[" in meta("model", "test")
     assert "\033[" in colorize_patch("+added\n-removed")
+
+
+def test_failed_patch_apply_message_is_clear(monkeypatch, tmp_path, capsys):
+    init_repo(tmp_path)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+    def fake_resolve_agent_source(ref):
+        return AgentSource(tmp_path / "bundled_agent" / "agent.py", {"source_repo": "fake", "ref": "fake"})
+
+    def fake_run_agent(source, repo_path, task, model, api_base, api_key):
+        return {
+            "patch": "diff --git a/missing.txt b/missing.txt\n--- a/missing.txt\n+++ b/missing.txt\n@@ -1 +1 @@\n-old\n+new\n",
+            "logs": "",
+            "steps": 1,
+            "cost": None,
+            "success": False,
+        }
+
+    monkeypatch.setattr("xninja.cli.resolve_agent_source", fake_resolve_agent_source)
+    monkeypatch.setattr("xninja.cli.run_agent", fake_run_agent)
+
+    code = main(["--repo", str(tmp_path), "--apply", "fix missing file"])
+    captured = capsys.readouterr()
+
+    assert code != 0
+    assert "Patch did not apply cleanly" in captured.err
