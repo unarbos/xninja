@@ -64,6 +64,23 @@ def test_copy_repo_for_agent_isolates_target_repo(tmp_path):
     assert repo_is_git_worktree(copied)
 
 
+def test_dataclass_agent_module_loads(tmp_path):
+    fake_agent = tmp_path / "dataclass_agent.py"
+    fake_agent.write_text(
+        "from dataclasses import dataclass\n"
+        "@dataclass\n"
+        "class Thing:\n"
+        "    value: str\n"
+        "def solve(repo_path, issue, model, api_base, api_key):\n"
+        "    return {\"patch\": Thing(\"ok\").value, \"logs\": \"\", \"steps\": 1, \"cost\": None, \"success\": True}\n",
+        encoding="utf-8",
+    )
+
+    result = run_agent(AgentSource(fake_agent, {"ref": "dataclass"}), tmp_path, "task", "model", "base", "key")
+
+    assert result["patch"] == "ok"
+
+
 def test_fake_agent_smoke(tmp_path):
     init_repo(tmp_path)
     fake_agent = tmp_path / "fake_agent.py"

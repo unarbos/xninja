@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -61,6 +62,7 @@ def load_agent_module(source: AgentSource) -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load agent from {source.path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
