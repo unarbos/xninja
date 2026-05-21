@@ -163,6 +163,25 @@ def copy_repo_for_agent(repo_path: Path, root: Path) -> Path:
     return work_repo
 
 
+def run_git(repo_path: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def commit_agent_baseline(repo_path: Path) -> None:
+    run_git(repo_path, ["config", "user.email", "xninja@example.invalid"])
+    run_git(repo_path, ["config", "user.name", "xninja"])
+    run_git(repo_path, ["add", "-A"])
+    result = run_git(repo_path, ["commit", "--allow-empty", "-m", "xninja baseline"])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "failed to create xninja baseline commit")
+
+
 def stream_agent_logs_enabled(source: object) -> bool:
     return source is not None and "bundled_agent" in str(getattr(source, "path", ""))
 
@@ -206,11 +225,15 @@ def run_task(
     section("Working Trace") if stream_logs else info("Working...")
 
     previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
+    previous_model_stream_setting = os.environ.get("XNINJA_STREAM_MODEL")
     if stream_logs:
         os.environ["XNINJA_STREAM_LOGS"] = "raw" if raw_logs else "rendered"
+        if not raw_logs:
+            os.environ["XNINJA_STREAM_MODEL"] = "1"
     try:
         with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
             work_repo = copy_repo_for_agent(repo_path, Path(work_root))
+            commit_agent_baseline(work_repo)
             result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
     finally:
         if stream_logs:
@@ -218,6 +241,10 @@ def run_task(
                 os.environ.pop("XNINJA_STREAM_LOGS", None)
             else:
                 os.environ["XNINJA_STREAM_LOGS"] = previous_stream_setting
+            if previous_model_stream_setting is None:
+                os.environ.pop("XNINJA_STREAM_MODEL", None)
+            else:
+                os.environ["XNINJA_STREAM_MODEL"] = previous_model_stream_setting
     patch = patch_text(result)
     logs = printable_agent_logs(result.get("logs"))
     if logs and not stream_logs:

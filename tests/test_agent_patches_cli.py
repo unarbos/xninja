@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
-from xninja.cli import copy_repo_for_agent, main, meta, printable_agent_logs, stream_agent_logs_enabled, style
+from xninja.cli import commit_agent_baseline, copy_repo_for_agent, main, meta, printable_agent_logs, stream_agent_logs_enabled, style
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
 

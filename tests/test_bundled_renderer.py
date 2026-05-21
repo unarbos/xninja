@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from xninja.bundled_agent.agent import _render_log_item
+from xninja.bundled_agent.agent import _render_log_item, _stream_delta_text
 
 
 def test_render_model_response_as_transcript_lines():
@@ -85,3 +85,23 @@ FAILED test_example.py::test_nope
         "Result: exit 1 from pytest",
         "  FAILED test_example.py::test_nope",
     ]
+
+
+def test_stream_delta_text_reads_reasoning_and_content():
+    chunk = {"choices": [{"delta": {"reasoning": "think ", "content": "say"}}]}
+
+    assert _stream_delta_text(chunk) == "think say"
+
+
+def test_stream_delta_text_handles_empty_shape():
+    assert _stream_delta_text({"choices": [{"delta": {}}]}) == ""
+    assert _stream_delta_text({}) == ""
+
+
+def test_heartbeat_disabled_during_model_stream(monkeypatch):
+    from xninja.bundled_agent.agent import _start_model_wait_heartbeat
+
+    monkeypatch.setenv("XNINJA_STREAM_LOGS", "rendered")
+    monkeypatch.setenv("XNINJA_STREAM_MODEL", "1")
+
+    assert _start_model_wait_heartbeat([], 1, 1) is None

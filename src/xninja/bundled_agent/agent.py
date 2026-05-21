@@ -393,6 +393,8 @@ def _new_logs() -> List[str]:
 
 
 def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Optional[threading.Event]:
+    if _model_stream_enabled():
+        return None
     if os.environ.get("XNINJA_STREAM_LOGS") not in {"rendered", "raw", "1"}:
         return None
     stop = threading.Event()
@@ -445,6 +447,56 @@ def _messages_for_request(messages: List[Dict[str, str]]) -> List[Dict[str, str]
     }
     return [*head, note, *tail]
 
+
+
+
+def _streaming_enabled() -> bool:
+    return os.environ.get("XNINJA_STREAM_LOGS") in {"rendered", "raw", "1"}
+
+
+def _model_stream_enabled() -> bool:
+    return os.environ.get("XNINJA_STREAM_MODEL") == "1"
+
+
+def _stream_delta_text(chunk: Dict[str, Any]) -> str:
+    try:
+        delta = chunk.get("choices", [{}])[0].get("delta") or {}
+        parts: List[str] = []
+        for key in ("reasoning", "content"):
+            value = delta.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+        return "".join(parts)
+    except Exception:
+        return ""
+
+
+def _read_streaming_chat_response(resp: Any) -> Tuple[str, Dict[str, Any]]:
+    pieces: List[str] = []
+    saw_text = False
+    if _streaming_enabled():
+        print("Model:", flush=True)
+    for raw_line in resp:
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        text = _stream_delta_text(chunk)
+        if not text:
+            continue
+        pieces.append(text)
+        if _streaming_enabled():
+            saw_text = True
+            print(text, end="", flush=True)
+    if _streaming_enabled() and saw_text:
+        print("\n", flush=True)
+    return "".join(pieces), {"streamed": True}
 
 def _normalize_api_base(api_base: str) -> str:
     base = api_base.rstrip("/")
@@ -523,6 +575,8 @@ def chat_completion(
         "messages": messages,
         "max_tokens": max_tokens,
     }
+    if _model_stream_enabled():
+        payload["stream"] = True
 
     body = json.dumps(payload).encode("utf-8")
     headers = {
@@ -536,6 +590,9 @@ def chat_completion(
         req = urllib.request.Request(url=url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if _model_stream_enabled():
+                    content, stream_data = _read_streaming_chat_response(resp)
+                    return content, None, stream_data
                 raw = resp.read().decode("utf-8", errors="replace")
                 data = json.loads(raw)
             break
