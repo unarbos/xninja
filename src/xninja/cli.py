@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import textwrap
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -69,7 +70,8 @@ def section(title: str) -> None:
 
 
 def transcript_line(label: str, value: object) -> str:
-    return f"{style(label, 'dim')} {style(str(value), 'cyan')}"
+    label_text = style(f"{label}:", "bold", "cyan")
+    return f"{label_text} {value}"
 
 
 def fmt_elapsed_compact(elapsed_secs: int) -> str:
@@ -85,7 +87,11 @@ def fmt_elapsed_compact(elapsed_secs: int) -> str:
 
 def working_status(elapsed_secs: int = 0, interrupt_hint: str = "Ctrl-C") -> str:
     elapsed = fmt_elapsed_compact(elapsed_secs)
-    return f"{style('Working', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'dim')}"
+    return f"{style('Working', 'bold', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'dim')}"
+
+
+def action_line(label: str, value: object, color: str = "cyan") -> str:
+    return f"{style(label, 'bold', color)} {style(str(value), 'dim')}"
 
 
 def footer_hint(*parts: str) -> str:
@@ -267,6 +273,95 @@ def printable_agent_logs(logs: object) -> str:
     return str(logs).strip()
 
 
+NO_OP_MARKERS = (
+    "dont do anything",
+    "don't do anything",
+    "do not do anything",
+    "no changes",
+    "no-op",
+    "noop",
+    "just a test",
+    "this is a test",
+)
+QUESTION_MARKERS = (
+    "explain",
+    "what is",
+    "what does",
+    "how does",
+    "summarize",
+    "describe",
+    "walk me through",
+)
+
+
+def normalize_prompt(text: str) -> str:
+    return " ".join(text.lower().replace("’", "'").split())
+
+
+def is_noop_prompt(task: str) -> bool:
+    normalized = normalize_prompt(task)
+    return any(marker in normalized for marker in NO_OP_MARKERS)
+
+
+def is_read_only_prompt(task: str) -> bool:
+    normalized = normalize_prompt(task)
+    return normalized.endswith("?") or any(marker in normalized for marker in QUESTION_MARKERS)
+
+
+def run_read_only_task(repo_path: Path, task: str, model: str) -> int:
+    section("xninja")
+    print(transcript_line("user", task))
+    print(transcript_line("model", model))
+    print(transcript_line("cwd", repo_path))
+    print(action_line("Read-only", "not calling patch agent", "cyan"))
+
+    if is_noop_prompt(task):
+        print()
+        print("No changes made. Your prompt explicitly asked for no action.")
+        return 0
+
+    print()
+    print(repo_summary(repo_path))
+    return 0
+
+
+def read_text_file(path: Path, max_chars: int = 4000) -> str:
+    try:
+        return path.read_text(encoding="utf-8")[:max_chars]
+    except OSError:
+        return ""
+
+
+def list_repo_files(repo_path: Path, max_files: int = 14) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=repo_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    ignored_parts = {".venv", "__pycache__", ".pytest_cache", "build", "dist"}
+    files = [line for line in result.stdout.splitlines() if not ignored_parts.intersection(Path(line).parts)]
+    return files[:max_files]
+
+
+def repo_summary(repo_path: Path) -> str:
+    pyproject = read_text_file(repo_path / "pyproject.toml")
+    readme = read_text_file(repo_path / "README.md", max_chars=1600)
+    files = list_repo_files(repo_path)
+    file_lines = "\n".join(f"  - {name}" for name in files) or "  - no tracked files found"
+    package_hint = "Python package" if "[project]" in pyproject else "repository"
+    readme_hint = textwrap.shorten(" ".join(readme.split()), width=420, placeholder="...") if readme else "No README summary found."
+    return (
+        f"This looks like a {package_hint}.\n\n"
+        f"README: {readme_hint}\n\n"
+        f"Tracked files:\n{file_lines}\n\n"
+        "No files were changed."
+    )
+
+
 def run_task(
     repo: Path,
     task: str,
@@ -292,6 +387,9 @@ def run_task(
         return 2
 
     model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
+    if is_noop_prompt(task) or is_read_only_prompt(task):
+        return run_read_only_task(repo_path, task, model)
+
     source = resolve_agent_source(agent_ref)
     previous_color = os.environ.get("XNINJA_COLOR")
     os.environ["XNINJA_COLOR"] = color
