@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Sequence
 
 from xninja import __version__
-from xninja.agent import bundled_agent_source, resolve_agent_source, run_agent, update_cached_agent
+from xninja.agent import bundled_agent_source, local_agent_source, resolve_agent_source, run_agent, update_cached_agent
 from xninja.config import (
     XninjaConfig,
     config_path,
@@ -134,7 +134,7 @@ def error(text: str) -> None:
 
 
 COMMAND_NAMES = {"run", "exec", "e", "config", "models", "agent"}
-GLOBAL_OPTIONS_WITH_VALUE = {"--repo", "-C", "--cd", "--model", "-m", "--color", "--agent-ref"}
+GLOBAL_OPTIONS_WITH_VALUE = {"--repo", "-C", "--cd", "--model", "-m", "--color", "--agent-ref", "--agent-path"}
 
 
 def add_run_options(parser: argparse.ArgumentParser, repo_help: str) -> None:
@@ -142,6 +142,7 @@ def add_run_options(parser: argparse.ArgumentParser, repo_help: str) -> None:
     parser.add_argument("--model", "-m", help="OpenRouter model id")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="when to use ANSI color")
     parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
+    parser.add_argument("--agent-path", help="local agent.py path to use instead of bundled or fetched agent")
     parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
     parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
     parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
@@ -190,7 +191,7 @@ def first_positional_arg(argv: Sequence[str]) -> str | None:
         if arg in GLOBAL_OPTIONS_WITH_VALUE:
             skip_next = True
             continue
-        if arg.startswith("--repo=") or arg.startswith("--cd=") or arg.startswith("--model=") or arg.startswith("--color=") or arg.startswith("--agent-ref="):
+        if arg.startswith("--repo=") or arg.startswith("--cd=") or arg.startswith("--model=") or arg.startswith("--color=") or arg.startswith("--agent-ref=") or arg.startswith("--agent-path="):
             continue
         if arg.startswith("-"):
             continue
@@ -288,6 +289,12 @@ def stream_agent_logs_enabled(source: object) -> bool:
     return source is not None and "bundled_agent" in str(getattr(source, "path", ""))
 
 
+def select_agent_source(agent_ref: str | None, agent_path: str | None):
+    if agent_path:
+        return local_agent_source(agent_path)
+    return resolve_agent_source(agent_ref)
+
+
 def printable_agent_logs(logs: object) -> str:
     if logs is None:
         return ""
@@ -299,6 +306,7 @@ def run_task(
     task: str,
     explicit_model: str | None,
     agent_ref: str | None,
+    agent_path: str | None,
     apply_requested: bool,
     raw_logs: bool = False,
     color: ColorMode = "auto",
@@ -319,7 +327,11 @@ def run_task(
         return 2
 
     model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
-    source = resolve_agent_source(agent_ref)
+    try:
+        source = select_agent_source(agent_ref, agent_path)
+    except (FileNotFoundError, ValueError) as exc:
+        error(str(exc))
+        return 2
     previous_color = os.environ.get("XNINJA_COLOR")
     os.environ["XNINJA_COLOR"] = color
     section("xninja")
@@ -398,7 +410,7 @@ def interactive(args: argparse.Namespace) -> int:
                 return 0
             if not task:
                 continue
-            code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
+            code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
             if code not in {0, 1}:
                 return code
     finally:
@@ -435,10 +447,10 @@ def dispatch(args: argparse.Namespace) -> int:
         if args.agent_command == "update":
             return agent_update(args)
     if args.command in {"run", "exec", "e"}:
-        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
+        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
     prompt = getattr(args, "prompt", [])
     if prompt:
-        return run_task(Path(args.repo), " ".join(prompt), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
+        return run_task(Path(args.repo), " ".join(prompt), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
     return interactive(args)
 
 

@@ -39,6 +39,15 @@ def bundled_agent_source() -> AgentSource:
     return AgentSource(path=BUNDLED_AGENT_PATH, metadata=read_json(BUNDLED_METADATA_PATH))
 
 
+def local_agent_source(path: str | Path) -> AgentSource:
+    agent_path = Path(path).expanduser().resolve()
+    if not agent_path.exists():
+        raise FileNotFoundError(f"agent path does not exist: {agent_path}")
+    if not agent_path.is_file():
+        raise ValueError(f"agent path is not a file: {agent_path}")
+    return AgentSource(path=agent_path, metadata={"source_repo": "local", "ref": "local", "path": str(agent_path)})
+
+
 def cached_agent_source(ref: str, env: dict[str, str] | None = None) -> AgentSource | None:
     root = cache_dir(env) / "agents" / ref.replace("/", "_")
     path = root / USER_AGENT_PATH

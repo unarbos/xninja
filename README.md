@@ -102,6 +102,20 @@ xninja agent update --ref cec561e45192042687c053237c1db503cd7d3ae0
 xninja run --agent-ref cec561e45192042687c053237c1db503cd7d3ae0 "fix the issue"
 ```
 
+Use your own compatible local `agent.py`:
+
+```bash
+xninja run --agent-path ./agent.py "fix the issue"
+xninja --agent-path ~/agents/my_agent.py "fix the issue"
+```
+
+Custom agents must expose the same callable contract as the bundled agent:
+
+```python
+def solve(repo_path, issue, model, api_base, api_key):
+    return {"patch": "", "logs": "", "steps": 0, "cost": None, "success": True}
+```
+
 ## Models
 
 ```bash

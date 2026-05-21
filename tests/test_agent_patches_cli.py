@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
+from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, local_agent_source, run_agent
 from xninja.cli import (
     brand,
     colorize_patch,
@@ -20,6 +20,7 @@ from xninja.cli import (
     meta,
     parse_args,
     printable_agent_logs,
+    select_agent_source,
     stream_agent_logs_enabled,
     style,
     working_status,
@@ -289,3 +290,55 @@ def test_cli_version_smoke(capsys):
 
     assert exc.value.code == 0
     assert captured.out.strip().startswith("xninja ")
+
+
+def test_local_agent_source_loads_path(tmp_path):
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "def solve(repo_path, issue, model, api_base, api_key): "
+        "return {'patch': '', 'logs': '', 'steps': 0, 'cost': None, 'success': True}\n",
+        encoding="utf-8",
+    )
+
+    source = local_agent_source(agent)
+
+    assert source.path == agent.resolve()
+    assert source.metadata["source_repo"] == "local"
+
+
+def test_local_agent_source_rejects_missing_path(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        local_agent_source(tmp_path / "missing.py")
+
+
+def test_parse_args_accepts_agent_path(tmp_path):
+    agent = tmp_path / "agent.py"
+    args = parse_args(["--agent-path", str(agent), "fix", "it"])
+
+    assert args.agent_path == str(agent)
+    assert args.prompt == ["fix", "it"]
+
+
+def test_select_agent_source_prefers_agent_path(tmp_path):
+    agent = tmp_path / "agent.py"
+    agent.write_text("def solve(repo_path, issue, model, api_base, api_key): return {}\n", encoding="utf-8")
+
+    source = select_agent_source("main", str(agent))
+
+    assert source.path == agent.resolve()
+    assert source.metadata["source_repo"] == "local"
+
+
+def test_custom_agent_path_smoke(tmp_path, monkeypatch):
+    init_repo(tmp_path)
+    agent = tmp_path / "custom_agent.py"
+    agent.write_text(
+        "def solve(repo_path, issue, model, api_base, api_key):\n"
+        "    return {\"patch\": \"\", \"logs\": f'{issue}:{model}:{bool(api_key)}', \"steps\": 1, \"cost\": None, \"success\": True}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+    code = main(["--repo", str(tmp_path), "--agent-path", str(agent), "custom task"])
+
+    assert code == 1
