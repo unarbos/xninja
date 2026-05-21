@@ -15,7 +15,8 @@ def test_render_model_response_as_transcript_lines():
         "Plan:",
         "  Check README and edit it.",
         "Edit: replace README.md",
-        "Tool: cat README.md",
+        "Tools:",
+        "  cat README.md",
         "Final: Done",
     ]
 
@@ -40,8 +41,8 @@ hello
 
 def test_render_wait_and_step_lines():
     assert _render_log_item("\n\n===== STEP 2 =====\n") == ["Step 2"]
-    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=5s") == [
-        "Waiting for model: step=1 attempt=1 waited=5s"
+    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=15s") == [
+        "Waiting for model: step=1 attempt=1 waited=15s"
     ]
 
 
@@ -105,3 +106,22 @@ def test_heartbeat_disabled_during_model_stream(monkeypatch):
     monkeypatch.setenv("XNINJA_STREAM_MODEL", "1")
 
     assert _start_model_wait_heartbeat([], 1, 1) is None
+
+
+def test_render_model_response_summarizes_many_tools():
+    item = """MODEL_RESPONSE:
+<command>cat a.py</command>
+<command>cat b.py</command>
+<command>cat c.py</command>
+<command>cat d.py</command>
+<command>cat e.py</command>
+"""
+
+    assert _render_log_item(item) == [
+        "Tools:",
+        "  cat a.py",
+        "  cat b.py",
+        "  cat c.py",
+        "  cat d.py",
+        "  ... plus 1 more",
+    ]

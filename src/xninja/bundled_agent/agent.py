@@ -349,21 +349,41 @@ def _render_observation(item: str) -> List[str]:
         lines.append("  " + _clip_stream_text(output, 1200).replace("\n", "\n  "))
     return lines
 
+def _first_nonempty_lines(text: str, limit: int) -> List[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()][:limit]
+
+
+def _summarize_commands(commands: List[str], limit: int = 4) -> List[str]:
+    heads = [_command_head(command) for command in commands]
+    shown = heads[:limit]
+    if len(heads) > limit:
+        shown.append(f"... plus {len(heads) - limit} more")
+    return shown
+
+
 def _render_model_response(item: str) -> List[str]:
     body = item.split("MODEL_RESPONSE:", 1)[1] if "MODEL_RESPONSE:" in item else item
     lines: List[str] = []
-    for plan in _extract_tag_text(body, "plan"):
+    plans = _extract_tag_text(body, "plan")
+    if plans:
         lines.append("Plan:")
-        lines.append("  " + _clip_stream_text(plan).replace("\n", "\n  "))
-    lines.extend(_extract_edit_summaries(body))
-    for command in _extract_tag_text(body, "command"):
-        lines.append("Tool: " + command.splitlines()[0])
+        for line in _first_nonempty_lines(plans[0], 4):
+            lines.append("  " + _clip_stream_text(line, 180))
+    edits = _extract_edit_summaries(body)
+    if edits:
+        lines.extend(edits[:4])
+        if len(edits) > 4:
+            lines.append(f"Edit: ... plus {len(edits) - 4} more")
+    commands = _extract_tag_text(body, "command")
+    if commands:
+        lines.append("Tools:")
+        for command in _summarize_commands(commands):
+            lines.append("  " + command)
     for final in _extract_tag_text(body, "final"):
-        lines.append("Final: " + _clip_stream_text(final).replace("\n", " "))
+        lines.append("Final: " + _clip_stream_text(final, 500).replace("\n", " "))
     if not lines:
         lines.append("Model response received.")
     return lines
-
 
 def _render_log_item(item: str) -> List[str]:
     stripped = item.strip()
@@ -401,8 +421,8 @@ def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Opt
 
     def beat() -> None:
         waited = 0
-        while not stop.wait(5):
-            waited += 5
+        while not stop.wait(15):
+            waited += 15
             logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
 
     threading.Thread(target=beat, daemon=True).start()

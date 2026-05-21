@@ -228,7 +228,7 @@ def run_task(
     previous_model_stream_setting = os.environ.get("XNINJA_STREAM_MODEL")
     if stream_logs:
         os.environ["XNINJA_STREAM_LOGS"] = "raw" if raw_logs else "rendered"
-        if not raw_logs:
+        if raw_logs:
             os.environ["XNINJA_STREAM_MODEL"] = "1"
     try:
         with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
