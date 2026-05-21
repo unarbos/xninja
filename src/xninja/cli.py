@@ -9,7 +9,7 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
-from typing import Sequence
+from typing import Literal, Sequence
 
 from xninja.agent import bundled_agent_source, resolve_agent_source, run_agent, update_cached_agent
 from xninja.config import (
@@ -37,7 +37,15 @@ ANSI_CODES = {
 }
 
 
-def color_enabled() -> bool:
+ColorMode = Literal["auto", "always", "never"]
+
+
+def color_enabled(mode: ColorMode | None = None) -> bool:
+    selected = mode or os.environ.get("XNINJA_COLOR", "auto")
+    if selected == "always":
+        return True
+    if selected == "never":
+        return False
     return os.environ.get("NO_COLOR") is None and os.environ.get("TERM") != "dumb"
 
 
@@ -53,7 +61,11 @@ def meta(name: str, value: object) -> str:
 
 
 def section(title: str) -> None:
-    print("\n" + style(title, "bold", "magenta"))
+    print("\n" + style(title, "bold", "cyan"))
+
+
+def transcript_line(label: str, value: object) -> str:
+    return f"{style(label, 'dim')} {value}"
 
 
 def info(text: str) -> None:
@@ -75,20 +87,24 @@ def error(text: str) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
     parser.add_argument("prompt", nargs="*", help="one-shot task prompt")
-    parser.add_argument("--repo", default=".", help="repository path for the task")
-    parser.add_argument("--model", help="OpenRouter model id")
+    parser.add_argument("--repo", "-C", "--cd", default=".", help="repository path for the task")
+    parser.add_argument("--model", "-m", help="OpenRouter model id")
+    parser.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="when to use ANSI color")
     parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
     parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
     parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
+    parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
     subparsers = parser.add_subparsers(dest="command")
 
-    run_parser = subparsers.add_parser("run", help="run one task")
+    run_parser = subparsers.add_parser("run", aliases=("exec", "e"), help="run one task")
     run_parser.add_argument("task", nargs="+", help="task prompt")
-    run_parser.add_argument("--repo", default=".", help="repository path")
-    run_parser.add_argument("--model", help="OpenRouter model id")
+    run_parser.add_argument("--repo", "-C", "--cd", default=".", help="repository path")
+    run_parser.add_argument("--model", "-m", help="OpenRouter model id")
+    run_parser.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="when to use ANSI color")
     run_parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
     run_parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
     run_parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
+    run_parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
 
     config_parser = subparsers.add_parser("config", help="configure OpenRouter and defaults")
     config_parser.add_argument("--show", action="store_true", help="show current config with secrets redacted")
@@ -200,6 +216,7 @@ def run_task(
     agent_ref: str | None,
     apply_requested: bool,
     raw_logs: bool = False,
+    color: ColorMode = "auto",
 ) -> int:
     repo_path = repo.expanduser().resolve()
     if not repo_path.exists():
@@ -218,10 +235,12 @@ def run_task(
 
     model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
     source = resolve_agent_source(agent_ref)
+    previous_color = os.environ.get("XNINJA_COLOR")
+    os.environ["XNINJA_COLOR"] = color
     section("xninja")
-    print(meta("prompt", task))
-    print(meta("agent", f"{source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}"))
-    print(meta("model", model))
+    print(transcript_line("user", task))
+    print(transcript_line("model", model))
+    print(transcript_line("cwd", repo_path))
     stream_logs = stream_agent_logs_enabled(source)
     section("Working") if stream_logs else info("Working...")
 
@@ -246,6 +265,10 @@ def run_task(
                 os.environ.pop("XNINJA_STREAM_MODEL", None)
             else:
                 os.environ["XNINJA_STREAM_MODEL"] = previous_model_stream_setting
+        if previous_color is None:
+            os.environ.pop("XNINJA_COLOR", None)
+        else:
+            os.environ["XNINJA_COLOR"] = previous_color
     patch = patch_text(result)
     logs = printable_agent_logs(result.get("logs"))
     if logs and not stream_logs:
@@ -275,19 +298,28 @@ def run_task(
 
 
 def interactive(args: argparse.Namespace) -> int:
-    section("xninja")
-    info("Interactive mode. Enter a task, or Ctrl-D to exit.")
-    while True:
-        try:
-            task = input("xninja> ").strip()
-        except EOFError:
-            print()
-            return 0
-        if not task:
-            continue
-        code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.apply, args.raw_logs)
-        if code not in {0, 1}:
-            return code
+    previous_color = os.environ.get("XNINJA_COLOR")
+    os.environ["XNINJA_COLOR"] = args.color
+    try:
+        section("xninja")
+        info(f"cwd {Path(args.repo).expanduser().resolve()}")
+        info("type a task, or Ctrl-D to exit")
+        while True:
+            try:
+                task = input("xninja> ").strip()
+            except EOFError:
+                print()
+                return 0
+            if not task:
+                continue
+            code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
+            if code not in {0, 1}:
+                return code
+    finally:
+        if previous_color is None:
+            os.environ.pop("XNINJA_COLOR", None)
+        else:
+            os.environ["XNINJA_COLOR"] = previous_color
 
 
 def agent_info() -> int:
@@ -316,10 +348,10 @@ def dispatch(args: argparse.Namespace) -> int:
             return agent_info()
         if args.agent_command == "update":
             return agent_update(args)
-    if args.command == "run":
-        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply, args.raw_logs)
+    if args.command in {"run", "exec", "e"}:
+        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
     if args.prompt:
-        return run_task(Path(args.repo), " ".join(args.prompt), args.model, args.agent_ref, args.apply, args.raw_logs)
+        return run_task(Path(args.repo), " ".join(args.prompt), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
     return interactive(args)
 
 

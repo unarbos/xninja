@@ -6,7 +6,17 @@ from pathlib import Path
 import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
-from xninja.cli import commit_agent_baseline, copy_repo_for_agent, main, meta, printable_agent_logs, stream_agent_logs_enabled, style
+from xninja.cli import (
+    build_parser,
+    color_enabled,
+    commit_agent_baseline,
+    copy_repo_for_agent,
+    main,
+    meta,
+    printable_agent_logs,
+    stream_agent_logs_enabled,
+    style,
+)
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
 
@@ -172,3 +182,20 @@ def test_cli_help_smoke(capsys):
 
     assert exc.value.code == 0
     assert "Run the ninja coding agent locally" in captured.out
+
+
+def test_codex_like_parser_aliases():
+    args = build_parser().parse_args(["exec", "-C", ".", "-m", "model/a", "--color", "never", "fix it"])
+
+    assert args.command == "exec"
+    assert args.repo == "."
+    assert args.model == "model/a"
+    assert args.color == "never"
+    assert args.task == ["fix it"]
+
+
+def test_color_mode_override(monkeypatch):
+    monkeypatch.setenv("TERM", "dumb")
+
+    assert color_enabled("always")
+    assert not color_enabled("never")
