@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from xninja.bundled_agent.agent import _StreamingLogList, _render_log_item, _stream_delta_text
+from xninja.bundled_agent.agent import (
+    _StreamingLogList,
+    _render_log_item,
+    _start_model_wait_heartbeat,
+    _stream_delta_text,
+)
 
 
 def test_render_model_response_as_transcript_lines():
@@ -139,3 +144,29 @@ def test_streaming_wait_status_rewrites_one_line(monkeypatch, capsys):
     assert "\r⠋ waiting: 2s" in captured
     assert "\r⠙ waiting: 4s" in captured
     assert "━━ Step 1 ━━" in captured
+
+
+def test_spinner_heartbeat_uses_fast_frame_interval(monkeypatch):
+    sleep_values = []
+
+    class FakeStop:
+        def wait(self, seconds):
+            sleep_values.append(seconds)
+            return True
+
+    class FakeThread:
+        def __init__(self, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setenv("XNINJA_STREAM_LOGS", "rendered")
+    monkeypatch.delenv("XNINJA_STREAM_MODEL", raising=False)
+    monkeypatch.setattr("xninja.bundled_agent.agent.threading.Event", FakeStop)
+    monkeypatch.setattr("xninja.bundled_agent.agent.threading.Thread", FakeThread)
+
+    _start_model_wait_heartbeat([], 1, 1)
+
+    assert sleep_values == [0.12]

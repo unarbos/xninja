@@ -494,10 +494,10 @@ def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Opt
 
     def beat() -> None:
         frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-        waited = 0
         frame_index = 0
-        while not stop.wait(2):
-            waited += 2
+        started = time.monotonic()
+        while not stop.wait(0.12):
+            waited = max(1, int(time.monotonic() - started))
             frame = frames[frame_index % len(frames)]
             frame_index += 1
             logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s frame={frame}")
