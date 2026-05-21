@@ -351,6 +351,34 @@ def _render_log_item(item: str) -> List[str]:
         return [_clip_stream_text(stripped).replace("\n", " | ")]
     return []
 
+
+
+def _new_logs() -> List[str]:
+    if os.environ.get("XNINJA_STREAM_LOGS") in {"rendered", "raw", "1"}:
+        return _StreamingLogList()
+    return []
+
+
+def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Optional[threading.Event]:
+    if os.environ.get("XNINJA_STREAM_LOGS") not in {"rendered", "raw", "1"}:
+        return None
+    stop = threading.Event()
+
+    def beat() -> None:
+        waited = 0
+        while not stop.wait(5):
+            waited += 5
+            logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
+
+    threading.Thread(target=beat, daemon=True).start()
+    return stop
+
+
+def _stop_model_wait_heartbeat(stop: Optional[threading.Event]) -> None:
+    if stop is not None:
+        stop.set()
+
+
 def _message_chars(messages: List[Dict[str, str]]) -> int:
     return sum(len(message.get("content") or "") + 32 for message in messages)
 

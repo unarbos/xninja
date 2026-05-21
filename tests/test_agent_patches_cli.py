@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from xninja.agent import AgentSource, bundled_agent_source, run_agent
+from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
 from xninja.cli import copy_repo_for_agent, main, meta, printable_agent_logs, stream_agent_logs_enabled, style
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
@@ -25,6 +25,13 @@ def test_bundled_agent_metadata_loads():
     assert source.path.exists()
     assert source.metadata["source_repo"] == "unarbos/ninja"
     assert source.metadata["commit"]
+
+
+def test_bundled_agent_streaming_helpers_load():
+    loaded = load_agent_module(bundled_agent_source())
+
+    assert callable(loaded.__dict__.get("_new_logs"))
+    assert callable(loaded.__dict__.get("_render_log_item"))
 
 
 def test_apply_patch_changes_temp_repo(tmp_path):
