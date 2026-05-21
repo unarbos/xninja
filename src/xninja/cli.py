@@ -113,6 +113,12 @@ def copy_repo_for_agent(repo_path: Path, root: Path) -> Path:
     return work_repo
 
 
+def printable_agent_logs(logs: object) -> str:
+    if logs is None:
+        return ""
+    return str(logs).strip()
+
+
 def run_task(
     repo: Path,
     task: str,
@@ -137,17 +143,19 @@ def run_task(
 
     model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
     source = resolve_agent_source(agent_ref)
+    print(f"Prompt: {task}")
     print(f"Running ninja agent from {source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}")
     print(f"Model: {model}")
+    print("Thinking...")
 
     with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
         work_repo = copy_repo_for_agent(repo_path, Path(work_root))
         result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
     patch = patch_text(result)
-    logs = result.get("logs")
+    logs = printable_agent_logs(result.get("logs"))
     if logs:
-        print("\nAgent logs:")
-        print(str(logs)[-4000:])
+        print("\nThinking trace:")
+        print(logs)
     if not patch.strip():
         print("\nAgent returned no patch.")
         return 1

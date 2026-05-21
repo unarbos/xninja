@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, run_agent
-from xninja.cli import copy_repo_for_agent, main
+from xninja.cli import copy_repo_for_agent, main, printable_agent_logs
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
 
@@ -120,6 +120,11 @@ def solve(repo_path, issue, model, api_base, api_key):
     )
 
     assert "hello fake" in patch_text(result)
+
+
+def test_printable_agent_logs_formats_none_and_text():
+    assert printable_agent_logs(None) == ""
+    assert printable_agent_logs("\nstep 1\n") == "step 1"
 
 
 def test_cli_help_smoke(capsys):
