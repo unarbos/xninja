@@ -8,11 +8,13 @@ import pytest
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
 from xninja.cli import (
     build_parser,
+    build_prompt_parser,
     color_enabled,
     commit_agent_baseline,
     copy_repo_for_agent,
     main,
     meta,
+    parse_args,
     printable_agent_logs,
     stream_agent_logs_enabled,
     style,
@@ -199,3 +201,23 @@ def test_color_mode_override(monkeypatch):
 
     assert color_enabled("always")
     assert not color_enabled("never")
+
+
+def test_parse_args_routes_prompt_and_commands():
+    prompt = parse_args(["--color", "never", "hello", "there"])
+    agent = parse_args(["agent", "info"])
+    run = parse_args(["exec", "-C", ".", "fix", "it"])
+
+    assert prompt.command is None
+    assert prompt.prompt == ["hello", "there"]
+    assert agent.command == "agent"
+    assert agent.agent_command == "info"
+    assert run.command == "exec"
+    assert run.task == ["fix", "it"]
+
+
+def test_prompt_parser_accepts_one_shot_text():
+    args = build_prompt_parser().parse_args(["-m", "model/a", "fix", "it"])
+
+    assert args.model == "model/a"
+    assert args.prompt == ["fix", "it"]

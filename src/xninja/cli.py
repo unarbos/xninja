@@ -84,27 +84,28 @@ def error(text: str) -> None:
     print(style(text, "red"), file=sys.stderr)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
-    parser.add_argument("prompt", nargs="*", help="one-shot task prompt")
-    parser.add_argument("--repo", "-C", "--cd", default=".", help="repository path for the task")
+COMMAND_NAMES = {"run", "exec", "e", "config", "models", "agent"}
+GLOBAL_OPTIONS_WITH_VALUE = {"--repo", "-C", "--cd", "--model", "-m", "--color", "--agent-ref"}
+
+
+def add_run_options(parser: argparse.ArgumentParser, repo_help: str) -> None:
+    parser.add_argument("--repo", "-C", "--cd", default=".", help=repo_help)
     parser.add_argument("--model", "-m", help="OpenRouter model id")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="when to use ANSI color")
     parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
     parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
     parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
     parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
+    add_run_options(parser, "repository path for the task")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", aliases=("exec", "e"), help="run one task")
     run_parser.add_argument("task", nargs="+", help="task prompt")
-    run_parser.add_argument("--repo", "-C", "--cd", default=".", help="repository path")
-    run_parser.add_argument("--model", "-m", help="OpenRouter model id")
-    run_parser.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="when to use ANSI color")
-    run_parser.add_argument("--agent-ref", help="unarbos/ninja ref to fetch/use instead of bundled agent")
-    run_parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
-    run_parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
-    run_parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
+    add_run_options(run_parser, "repository path")
 
     config_parser = subparsers.add_parser("config", help="configure OpenRouter and defaults")
     config_parser.add_argument("--show", action="store_true", help="show current config with secrets redacted")
@@ -120,6 +121,39 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("--ref", required=True, help="branch, tag, or commit")
 
     return parser
+
+
+def build_prompt_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="xninja", description="Run the ninja coding agent locally.")
+    add_run_options(parser, "repository path for the task")
+    parser.add_argument("prompt", nargs="*", help="one-shot task prompt")
+    return parser
+
+
+def first_positional_arg(argv: Sequence[str]) -> str | None:
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in GLOBAL_OPTIONS_WITH_VALUE:
+            skip_next = True
+            continue
+        if arg.startswith("--repo=") or arg.startswith("--cd=") or arg.startswith("--model=") or arg.startswith("--color=") or arg.startswith("--agent-ref="):
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return None
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    first = first_positional_arg(argv)
+    if first is not None and first not in COMMAND_NAMES:
+        args = build_prompt_parser().parse_args(argv)
+        args.command = None
+        return args
+    return build_parser().parse_args(argv)
 
 
 def print_config(config: XninjaConfig) -> None:
@@ -356,8 +390,7 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parse_args(tuple(sys.argv[1:] if argv is None else argv))
     try:
         return dispatch(args)
     except KeyboardInterrupt:
