@@ -290,6 +290,14 @@ def _stream_pair(label: str, value: str, color: str = "cyan") -> str:
     return f"{_stream_style(label + ':', 'bold', color)} {value}"
 
 
+def _render_step_header(step: str) -> str:
+    return _stream_style(f"━━ Step {step} ━━", "bold", "magenta")
+
+
+def _render_waiting_line(waited: str, frame: str = "⠋") -> str:
+    return f"{_stream_style(frame, 'bold', 'magenta')} {_stream_pair('waiting', waited, 'magenta')}"
+
+
 class _StreamingLogList(list):
     def append(self, item: str) -> None:
         super().append(item)
@@ -427,11 +435,13 @@ def _render_log_item(item: str) -> List[str]:
         return []
     step_match = re.search(r"===== STEP (\d+) =====", stripped)
     if step_match:
-        return ["", _stream_style(f"Step {step_match.group(1)}", "bold", "magenta")]
+        return ["", _render_step_header(step_match.group(1)), ""]
     if stripped.startswith("MODEL_WAIT:"):
         waited_match = re.search(r"waited=(\d+)s", stripped)
+        frame_match = re.search(r"frame=([^\s]+)", stripped)
         waited = waited_match.group(1) + "s" if waited_match else "still running"
-        return [_stream_pair("waiting", waited, "magenta")]
+        frame = frame_match.group(1) if frame_match else "⠋"
+        return [_render_waiting_line(waited, frame)]
     if "MODEL_RESPONSE:" in stripped:
         return _render_model_response(stripped)
     if "OBSERVATION" in stripped and "COMMAND:" in stripped:
@@ -458,10 +468,14 @@ def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Opt
     stop = threading.Event()
 
     def beat() -> None:
+        frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
         waited = 0
-        while not stop.wait(30):
-            waited += 30
-            logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
+        frame_index = 0
+        while not stop.wait(2):
+            waited += 2
+            frame = frames[frame_index % len(frames)]
+            frame_index += 1
+            logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s frame={frame}")
 
     threading.Thread(target=beat, daemon=True).start()
     return stop
