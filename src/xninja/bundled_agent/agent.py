@@ -55,6 +55,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.error
@@ -269,6 +270,26 @@ def _new_logs() -> List[str]:
     if os.environ.get("XNINJA_STREAM_LOGS") == "1":
         return _StreamingLogList()
     return []
+
+
+def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Optional[threading.Event]:
+    if os.environ.get("XNINJA_STREAM_LOGS") != "1":
+        return None
+    stop = threading.Event()
+
+    def beat() -> None:
+        waited = 0
+        while not stop.wait(5):
+            waited += 5
+            logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
+
+    threading.Thread(target=beat, daemon=True).start()
+    return stop
+
+
+def _stop_model_wait_heartbeat(stop: Optional[threading.Event]) -> None:
+    if stop is not None:
+        stop.set()
 
 
 def _message_chars(messages: List[Dict[str, str]]) -> int:
@@ -4744,6 +4765,7 @@ def _solve_attempt(**kwargs: Any) -> Dict[str, Any]:
 
             response_text: Optional[str] = None
             for retry_attempt in range(MAX_STEP_RETRIES + 1):
+                heartbeat = _start_model_wait_heartbeat(logs, step, retry_attempt + 1)
                 try:
                     response_text, cost, _raw = chat_completion(
                         messages=_messages_for_request(messages),
@@ -4764,6 +4786,8 @@ def _solve_attempt(**kwargs: Any) -> Dict[str, Any]:
                         time.sleep(HTTP_RETRY_BASE_BACKOFF * (2 ** retry_attempt))
                         continue
                     break
+                finally:
+                    _stop_model_wait_heartbeat(heartbeat)
 
             if response_text is None:
                 consecutive_model_errors += 1
