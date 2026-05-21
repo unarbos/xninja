@@ -221,3 +221,11 @@ def test_prompt_parser_accepts_one_shot_text():
 
     assert args.model == "model/a"
     assert args.prompt == ["fix", "it"]
+
+
+def test_parse_args_without_prompt_enters_interactive_shape():
+    args = parse_args([])
+
+    assert args.command is None
+    assert not getattr(args, "prompt", [])
+    assert args.repo == "."

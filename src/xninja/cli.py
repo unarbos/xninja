@@ -384,8 +384,9 @@ def dispatch(args: argparse.Namespace) -> int:
             return agent_update(args)
     if args.command in {"run", "exec", "e"}:
         return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
-    if args.prompt:
-        return run_task(Path(args.repo), " ".join(args.prompt), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
+    prompt = getattr(args, "prompt", [])
+    if prompt:
+        return run_task(Path(args.repo), " ".join(prompt), args.model, args.agent_ref, args.apply, args.raw_logs or args.verbose, args.color)
     return interactive(args)
 
 
