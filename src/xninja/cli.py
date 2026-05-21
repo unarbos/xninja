@@ -31,7 +31,6 @@ ANSI_CODES = {
     "dim": "\033[2m",
     "red": "\033[31m",
     "green": "\033[32m",
-    "yellow": "\033[33m",
     "cyan": "\033[36m",
     "magenta": "\033[35m",
 }
@@ -60,12 +59,37 @@ def meta(name: str, value: object) -> str:
     return f"{style(name + ':', 'dim')} {value}"
 
 
+def brand(text: str = "xninja") -> str:
+    return style(text, "bold", "magenta")
+
+
 def section(title: str) -> None:
-    print("\n" + style(title, "bold", "cyan"))
+    rendered = brand(title) if title == "xninja" else style(title, "bold")
+    print("\n" + rendered)
 
 
 def transcript_line(label: str, value: object) -> str:
-    return f"{style(label, 'dim')} {value}"
+    return f"{style(label, 'dim')} {style(str(value), 'cyan')}"
+
+
+def fmt_elapsed_compact(elapsed_secs: int) -> str:
+    if elapsed_secs < 60:
+        return f"{elapsed_secs}s"
+    if elapsed_secs < 3600:
+        minutes, seconds = divmod(elapsed_secs, 60)
+        return f"{minutes}m {seconds:02}s"
+    hours, remainder = divmod(elapsed_secs, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}h {minutes:02}m {seconds:02}s"
+
+
+def working_status(elapsed_secs: int = 0, interrupt_hint: str = "Ctrl-C") -> str:
+    elapsed = fmt_elapsed_compact(elapsed_secs)
+    return f"{style('Working', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'dim')}"
+
+
+def footer_hint(*parts: str) -> str:
+    return style(" · ".join(part for part in parts if part), "dim")
 
 
 def info(text: str) -> None:
@@ -73,7 +97,7 @@ def info(text: str) -> None:
 
 
 def warn(text: str) -> None:
-    print(style(text, "yellow"))
+    print(style(text, "red"))
 
 
 def success(text: str) -> None:
@@ -194,8 +218,8 @@ def list_models(config: XninjaConfig) -> int:
 def prompt_apply(config: XninjaConfig) -> tuple[bool, XninjaConfig]:
     if apply_patch_allowed(config):
         return True, config
-    warn("Review the patch above carefully. Only apply it if it is useful.")
-    answer = input("Apply this patch? [y/N/always] ").strip().lower()
+    info("Review the patch above carefully. Only apply it if it is useful.")
+    answer = input(f"{style('Apply patch?', 'cyan')} {style('[y/N/always]', 'dim')} ").strip().lower()
     if answer == "always":
         updated = remember_apply_patch(config)
         save_config(updated)
@@ -276,7 +300,7 @@ def run_task(
     print(transcript_line("model", model))
     print(transcript_line("cwd", repo_path))
     stream_logs = stream_agent_logs_enabled(source)
-    section("Working") if stream_logs else info("Working...")
+    print(working_status())
 
     previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
     previous_model_stream_setting = os.environ.get("XNINJA_STREAM_MODEL")
@@ -336,8 +360,8 @@ def interactive(args: argparse.Namespace) -> int:
     os.environ["XNINJA_COLOR"] = args.color
     try:
         section("xninja")
-        info(f"cwd {Path(args.repo).expanduser().resolve()}")
-        info("type a task, or Ctrl-D to exit")
+        print(transcript_line("cwd", Path(args.repo).expanduser().resolve()))
+        print(footer_hint("enter to send", "Ctrl-D to exit", "--help for options"))
         while True:
             try:
                 task = input("xninja> ").strip()

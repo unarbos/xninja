@@ -7,17 +7,21 @@ import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
 from xninja.cli import (
+    brand,
     build_parser,
     build_prompt_parser,
     color_enabled,
     commit_agent_baseline,
     copy_repo_for_agent,
     main,
+    footer_hint,
+    fmt_elapsed_compact,
     meta,
     parse_args,
     printable_agent_logs,
     stream_agent_logs_enabled,
     style,
+    working_status,
 )
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
@@ -229,3 +233,14 @@ def test_parse_args_without_prompt_enters_interactive_shape():
     assert args.command is None
     assert not getattr(args, "prompt", [])
     assert args.repo == "."
+
+
+def test_codex_style_helpers_are_compact(monkeypatch):
+    monkeypatch.setenv("XNINJA_COLOR", "never")
+
+    assert brand() == "xninja"
+    assert fmt_elapsed_compact(0) == "0s"
+    assert fmt_elapsed_compact(61) == "1m 01s"
+    assert fmt_elapsed_compact(3661) == "1h 01m 01s"
+    assert working_status() == "Working (0s • Ctrl-C to interrupt)"
+    assert footer_hint("enter to send", "Ctrl-D to exit") == "enter to send · Ctrl-D to exit"
