@@ -223,7 +223,7 @@ def run_task(
     print(meta("agent", f"{source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}"))
     print(meta("model", model))
     stream_logs = stream_agent_logs_enabled(source)
-    section("Working Trace") if stream_logs else info("Working...")
+    section("Working") if stream_logs else info("Working...")
 
     previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
     previous_model_stream_setting = os.environ.get("XNINJA_STREAM_MODEL")

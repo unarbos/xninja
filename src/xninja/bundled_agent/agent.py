@@ -323,13 +323,11 @@ def _render_success_output(command: str, stdout: str) -> List[str]:
     if command.strip().startswith("<edit "):
         return ["  " + _clip_stream_text(stdout, 500).replace("\n", "\n  ")] if stdout else []
     if _looks_like_test_command(command):
-        tail = "\n".join(stdout.splitlines()[-8:])
-        return ["  " + _clip_stream_text(tail, 800).replace("\n", "\n  ")] if tail else []
+        tail = "\n".join(stdout.splitlines()[-6:])
+        return ["  " + _clip_stream_text(tail, 700).replace("\n", "\n  ")] if tail else []
     if _looks_like_inspection_command(command):
-        lines = _line_count(stdout)
-        chars = len(stdout)
-        return [f"  read {lines} lines ({chars} chars)"] if stdout else []
-    if _line_count(stdout) <= 4 and len(stdout) <= 500:
+        return []
+    if _line_count(stdout) <= 3 and len(stdout) <= 300:
         return ["  " + stdout.strip().replace("\n", "\n  ")] if stdout.strip() else []
     return [f"  output hidden: {_line_count(stdout)} lines ({len(stdout)} chars)"]
 
@@ -340,13 +338,20 @@ def _render_observation(item: str) -> List[str]:
     stdout = _observation_section(item, "STDOUT")
     stderr = _observation_section(item, "STDERR")
     command_head = _command_head(command)
-    lines = [f"Result: exit {exit_code or '?'} from {command_head}"]
+    if exit_code == "0" and not stderr.strip() and _looks_like_inspection_command(command):
+        return []
+    verb = "ran"
+    if command.strip().startswith("<edit "):
+        verb = "edited"
+    elif _looks_like_test_command(command):
+        verb = "tested"
+    lines = [f"{verb}: {command_head} (exit {exit_code or '?'})"]
     if exit_code == "0" and not stderr.strip():
         lines.extend(_render_success_output(command, stdout))
         return lines
     output = stderr or stdout
     if output:
-        lines.append("  " + _clip_stream_text(output, 1200).replace("\n", "\n  "))
+        lines.append("  " + _clip_stream_text(output, 900).replace("\n", "\n  "))
     return lines
 
 def _first_nonempty_lines(text: str, limit: int) -> List[str]:
@@ -366,23 +371,22 @@ def _render_model_response(item: str) -> List[str]:
     lines: List[str] = []
     plans = _extract_tag_text(body, "plan")
     if plans:
-        lines.append("Plan:")
-        for line in _first_nonempty_lines(plans[0], 4):
-            lines.append("  " + _clip_stream_text(line, 180))
+        first_plan = _first_nonempty_lines(plans[0], 1)
+        if first_plan:
+            lines.append("thinking: " + _clip_stream_text(first_plan[0], 180))
     edits = _extract_edit_summaries(body)
     if edits:
-        lines.extend(edits[:4])
+        lines.extend(edit.replace("Edit:", "edit:", 1) for edit in edits[:4])
         if len(edits) > 4:
-            lines.append(f"Edit: ... plus {len(edits) - 4} more")
+            lines.append(f"edit: ... plus {len(edits) - 4} more")
     commands = _extract_tag_text(body, "command")
     if commands:
-        lines.append("Tools:")
-        for command in _summarize_commands(commands):
-            lines.append("  " + command)
+        summarized = _summarize_commands(commands, limit=3)
+        lines.append("tools: " + "; ".join(summarized))
     for final in _extract_tag_text(body, "final"):
-        lines.append("Final: " + _clip_stream_text(final, 500).replace("\n", " "))
+        lines.append("final: " + _clip_stream_text(final, 350).replace("\n", " "))
     if not lines:
-        lines.append("Model response received.")
+        lines.append("model response received")
     return lines
 
 def _render_log_item(item: str) -> List[str]:
@@ -391,9 +395,9 @@ def _render_log_item(item: str) -> List[str]:
         return []
     step_match = re.search(r"===== STEP (\d+) =====", stripped)
     if step_match:
-        return [f"Step {step_match.group(1)}"]
+        return [f"step {step_match.group(1)}"]
     if stripped.startswith("MODEL_WAIT:"):
-        return [stripped.replace("MODEL_WAIT:", "Waiting for model:", 1).strip()]
+        return []
     if "MODEL_RESPONSE:" in stripped:
         return _render_model_response(stripped)
     if "OBSERVATION" in stripped and "COMMAND:" in stripped:
@@ -421,8 +425,8 @@ def _start_model_wait_heartbeat(logs: List[str], step: int, attempt: int) -> Opt
 
     def beat() -> None:
         waited = 0
-        while not stop.wait(15):
-            waited += 15
+        while not stop.wait(30):
+            waited += 30
             logs.append(f"MODEL_WAIT: step={step} attempt={attempt} waited={waited}s")
 
     threading.Thread(target=beat, daemon=True).start()

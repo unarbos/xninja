@@ -12,12 +12,10 @@ def test_render_model_response_as_transcript_lines():
 """
 
     assert _render_log_item(item) == [
-        "Plan:",
-        "  Check README and edit it.",
-        "Edit: replace README.md",
-        "Tools:",
-        "  cat README.md",
-        "Final: Done",
+        "thinking: Check README and edit it.",
+        "edit: replace README.md",
+        "tools: cat README.md",
+        "final: Done",
     ]
 
 
@@ -36,14 +34,12 @@ STDOUT:
 hello
 """
 
-    assert _render_log_item(item) == ["Result: exit 0 from cat README.md", "  read 1 lines (5 chars)"]
+    assert _render_log_item(item) == []
 
 
 def test_render_wait_and_step_lines():
-    assert _render_log_item("\n\n===== STEP 2 =====\n") == ["Step 2"]
-    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=15s") == [
-        "Waiting for model: step=1 attempt=1 waited=15s"
-    ]
+    assert _render_log_item("\n\n===== STEP 2 =====\n") == ["step 2"]
+    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=30s") == []
 
 
 def test_render_edit_success_keeps_short_result():
@@ -62,7 +58,7 @@ Replaced 1 occurrence in README.md
 """
 
     assert _render_log_item(item) == [
-        "Result: exit 0 from <edit path='README.md' op='replace'>",
+        "edited: <edit path='README.md' op='replace'> (exit 0)",
         "  Replaced 1 occurrence in README.md",
     ]
 
@@ -83,7 +79,7 @@ FAILED test_example.py::test_nope
 """
 
     assert _render_log_item(item) == [
-        "Result: exit 1 from pytest",
+        "tested: pytest (exit 1)",
         "  FAILED test_example.py::test_nope",
     ]
 
@@ -118,10 +114,5 @@ def test_render_model_response_summarizes_many_tools():
 """
 
     assert _render_log_item(item) == [
-        "Tools:",
-        "  cat a.py",
-        "  cat b.py",
-        "  cat c.py",
-        "  cat d.py",
-        "  ... plus 1 more",
+        "tools: cat a.py; cat b.py; cat c.py; ... plus 2 more",
     ]
