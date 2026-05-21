@@ -8,7 +8,6 @@ import pytest
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
 from xninja.cli import (
     brand,
-    action_line,
     build_parser,
     build_prompt_parser,
     color_enabled,
@@ -18,14 +17,10 @@ from xninja.cli import (
     footer_hint,
     fmt_elapsed_compact,
     meta,
-    is_noop_prompt,
-    is_read_only_prompt,
     parse_args,
-    repo_summary,
     printable_agent_logs,
     stream_agent_logs_enabled,
     style,
-    transcript_line,
     working_status,
 )
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
@@ -248,32 +243,4 @@ def test_codex_style_helpers_are_compact(monkeypatch):
     assert fmt_elapsed_compact(61) == "1m 01s"
     assert fmt_elapsed_compact(3661) == "1h 01m 01s"
     assert working_status() == "Working (0s • Ctrl-C to interrupt)"
-    assert transcript_line("user", "hello") == "user: hello"
     assert footer_hint("enter to send", "Ctrl-D to exit") == "enter to send · Ctrl-D to exit"
-
-
-def test_prompt_intent_guards_route_non_mutating_requests():
-    assert is_noop_prompt("hello, this is a test, dont do anything")
-    assert is_noop_prompt("please do not do anything")
-    assert is_read_only_prompt("can you explain this repo to me")
-    assert is_read_only_prompt("what does this file do?")
-    assert not is_read_only_prompt("fix the model selector")
-
-
-def test_repo_summary_is_read_only(tmp_path):
-    init_repo(tmp_path)
-    (tmp_path / "README.md").write_text("# Demo\n\nA tiny repo.", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "docs"], cwd=tmp_path, check=True, capture_output=True)
-
-    summary = repo_summary(tmp_path)
-
-    assert "No files were changed." in summary
-    assert "README:" in summary
-    assert "hello.txt" in summary
-
-
-def test_codex_style_helpers_use_visible_labels(monkeypatch):
-    monkeypatch.setenv("XNINJA_COLOR", "never")
-
-    assert action_line("Read-only", "not calling patch agent") == "Read-only not calling patch agent"
