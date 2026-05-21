@@ -96,6 +96,7 @@ def list_models(config: XninjaConfig) -> int:
 def prompt_apply(config: XninjaConfig) -> tuple[bool, XninjaConfig]:
     if apply_patch_allowed(config):
         return True, config
+    print("Review the patch above carefully. Only apply it if it is useful.")
     answer = input("Apply this patch? [y/N/always] ").strip().lower()
     if answer == "always":
         updated = remember_apply_patch(config)
