@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from xninja.agent import AgentSource, bundled_agent_source, run_agent
-from xninja.cli import copy_repo_for_agent, main, printable_agent_logs
+from xninja.cli import copy_repo_for_agent, main, printable_agent_logs, stream_agent_logs_enabled
 from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
 
 
@@ -120,6 +120,14 @@ def solve(repo_path, issue, model, api_base, api_key):
     )
 
     assert "hello fake" in patch_text(result)
+
+
+def test_stream_agent_logs_enabled_for_bundled_source(tmp_path):
+    bundled = tmp_path / "bundled_agent" / "agent.py"
+    cached = tmp_path / "cached" / "agent.py"
+
+    assert stream_agent_logs_enabled(AgentSource(bundled, {}))
+    assert not stream_agent_logs_enabled(AgentSource(cached, {}))
 
 
 def test_printable_agent_logs_formats_none_and_text():

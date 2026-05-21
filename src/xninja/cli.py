@@ -113,6 +113,10 @@ def copy_repo_for_agent(repo_path: Path, root: Path) -> Path:
     return work_repo
 
 
+def stream_agent_logs_enabled(source: object) -> bool:
+    return source is not None and "bundled_agent" in str(getattr(source, "path", ""))
+
+
 def printable_agent_logs(logs: object) -> str:
     if logs is None:
         return ""
@@ -146,14 +150,25 @@ def run_task(
     print(f"Prompt: {task}")
     print(f"Running ninja agent from {source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}")
     print(f"Model: {model}")
-    print("Thinking...")
+    stream_logs = stream_agent_logs_enabled(source)
+    print("Thinking" + (" trace:" if stream_logs else "..."))
 
-    with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
-        work_repo = copy_repo_for_agent(repo_path, Path(work_root))
-        result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
+    previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
+    if stream_logs:
+        os.environ["XNINJA_STREAM_LOGS"] = "1"
+    try:
+        with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
+            work_repo = copy_repo_for_agent(repo_path, Path(work_root))
+            result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
+    finally:
+        if stream_logs:
+            if previous_stream_setting is None:
+                os.environ.pop("XNINJA_STREAM_LOGS", None)
+            else:
+                os.environ["XNINJA_STREAM_LOGS"] = previous_stream_setting
     patch = patch_text(result)
     logs = printable_agent_logs(result.get("logs"))
-    if logs:
+    if logs and not stream_logs:
         print("\nThinking trace:")
         print(logs)
     if not patch.strip():

@@ -258,6 +258,19 @@ def _safe_join_logs(logs: List[str]) -> str:
     return _truncate(joined, MAX_TOTAL_LOG_CHARS)
 
 
+class _StreamingLogList(list):
+    def append(self, item: str) -> None:
+        super().append(item)
+        if item:
+            print(item, flush=True)
+
+
+def _new_logs() -> List[str]:
+    if os.environ.get("XNINJA_STREAM_LOGS") == "1":
+        return _StreamingLogList()
+    return []
+
+
 def _message_chars(messages: List[Dict[str, str]]) -> int:
     return sum(len(message.get("content") or "") + 32 for message in messages)
 
@@ -4353,7 +4366,7 @@ def _solve_attempt(**kwargs: Any) -> Dict[str, Any]:
     wall_clock_budget = float(kwargs.get("_wall_clock_budget", WALL_CLOCK_BUDGET_SECONDS))
     prior_attempt_summary = kwargs.get("_prior_attempt_summary", "")
     repo: Optional[Path] = None
-    logs: List[str] = []
+    logs: List[str] = _new_logs()
     total_cost: Optional[float] = 0.0
     success = False
     consecutive_no_command = 0
