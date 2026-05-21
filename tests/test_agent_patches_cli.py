@@ -81,6 +81,18 @@ def test_dataclass_agent_module_loads(tmp_path):
     assert result["patch"] == "ok"
 
 
+def test_run_agent_wraps_exception_from_solve(tmp_path):
+    fake_agent = tmp_path / "failing_agent.py"
+    fake_agent.write_text(
+        "def solve(repo_path, issue, model, api_base, api_key):\n"
+        "    raise ValueError('boom')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match=r"Agent solve\(\.\.\.\) raised an exception: boom"):
+        run_agent(AgentSource(fake_agent, {"ref": "failing"}), tmp_path, "task", "model", "base", "key")
+
+
 def test_fake_agent_smoke(tmp_path):
     init_repo(tmp_path)
     fake_agent = tmp_path / "fake_agent.py"

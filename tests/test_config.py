@@ -35,6 +35,17 @@ def test_env_overrides_secret_and_model():
 
     assert resolved.openrouter_api_key == "env-key"
     assert resolved.default_model == "env-model"
+    assert config.openrouter_api_key == "stored"
+    assert config.default_model == "stored-model"
+
+
+def test_config_with_empty_env_preserves_stored_values():
+    config = XninjaConfig(openrouter_api_key="stored", default_model="stored-model")
+
+    resolved = config_with_env(config, {})
+
+    assert resolved.openrouter_api_key == "stored"
+    assert resolved.default_model == "stored-model"
 
 
 def test_redact_secret():

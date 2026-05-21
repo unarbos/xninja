@@ -135,7 +135,7 @@ def run_task(
         print("OpenRouter API key is not configured. Run `xninja config` first.", file=sys.stderr)
         return 2
 
-    model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), config.default_model)
+    model = resolve_model(explicit_model, os.environ.get("XNINJA_MODEL"), stored_config.default_model)
     source = resolve_agent_source(agent_ref)
     print(f"Running ninja agent from {source.metadata.get('source_repo', 'local')} ref {source.metadata.get('ref', 'bundled')}")
     print(f"Model: {model}")

@@ -79,13 +79,16 @@ def run_agent(
     solve = getattr(module, "solve", None)
     if not callable(solve):
         raise RuntimeError(f"Agent at {source.path} does not define callable solve(...)")
-    result = solve(
-        repo_path=str(repo_path),
-        issue=issue,
-        model=model,
-        api_base=api_base,
-        api_key=api_key,
-    )
+    try:
+        result = solve(
+            repo_path=str(repo_path),
+            issue=issue,
+            model=model,
+            api_base=api_base,
+            api_key=api_key,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Agent solve(...) raised an exception: {exc}") from exc
     if not isinstance(result, dict):
         raise RuntimeError("Agent solve(...) returned a non-dict result")
     return result
