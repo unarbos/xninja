@@ -56,7 +56,7 @@ def style(text: str, *names: str) -> str:
 
 
 def meta(name: str, value: object) -> str:
-    return f"{style(name + ':', 'dim')} {value}"
+    return f"{style(name + ':', 'bold', 'cyan')} {style(str(value), 'magenta')}"
 
 
 def brand(text: str = "xninja") -> str:
@@ -64,12 +64,12 @@ def brand(text: str = "xninja") -> str:
 
 
 def section(title: str) -> None:
-    rendered = brand(title) if title == "xninja" else style(title, "bold")
+    rendered = brand(title) if title == "xninja" else style(title, "bold", "cyan")
     print("\n" + rendered)
 
 
 def transcript_line(label: str, value: object) -> str:
-    return f"{style(label, 'dim')} {style(str(value), 'cyan')}"
+    return f"{style(label + ':', 'bold', 'cyan')} {style(str(value), 'magenta')}"
 
 
 def fmt_elapsed_compact(elapsed_secs: int) -> str:
@@ -85,15 +85,33 @@ def fmt_elapsed_compact(elapsed_secs: int) -> str:
 
 def working_status(elapsed_secs: int = 0, interrupt_hint: str = "Ctrl-C") -> str:
     elapsed = fmt_elapsed_compact(elapsed_secs)
-    return f"{style('Working', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'dim')}"
+    return f"{style('Working', 'bold', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'magenta')}"
+
+
+def colorize_patch_line(line: str) -> str:
+    if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+        return style(line, "bold", "cyan")
+    if line.startswith("+"):
+        return style(line, "green")
+    if line.startswith("-"):
+        return style(line, "red")
+    if line.startswith("diff --git"):
+        return style(line, "bold", "magenta")
+    if line.startswith("index "):
+        return style(line, "dim")
+    return line
+
+
+def colorize_patch(text: str) -> str:
+    return "\n".join(colorize_patch_line(line) for line in text.splitlines())
 
 
 def footer_hint(*parts: str) -> str:
-    return style(" · ".join(part for part in parts if part), "dim")
+    return style(" · ".join(part for part in parts if part), "cyan")
 
 
 def info(text: str) -> None:
-    print(style(text, "dim"))
+    print(style(text, "cyan"))
 
 
 def warn(text: str) -> None:
@@ -211,7 +229,7 @@ def list_models(config: XninjaConfig) -> int:
     active = config_with_env(config).default_model
     for choice in RECOMMENDED_MODELS:
         marker = "*" if choice.model_id == active else " "
-        print(f"{style(marker, 'green')} {style(choice.model_id, 'bold')} {style('-', 'dim')} {choice.label}: {style(choice.note, 'dim')}")
+        print(f"{style(marker, 'green')} {style(choice.model_id, 'bold', 'magenta')} {style('-', 'cyan')} {style(choice.label + ':', 'cyan')} {style(choice.note, 'dim')}")
     return 0
 
 
@@ -219,7 +237,7 @@ def prompt_apply(config: XninjaConfig) -> tuple[bool, XninjaConfig]:
     if apply_patch_allowed(config):
         return True, config
     info("Review the patch above carefully. Only apply it if it is useful.")
-    answer = input(f"{style('Apply patch?', 'cyan')} {style('[y/N/always]', 'dim')} ").strip().lower()
+    answer = input(f"{style('Apply patch?', 'bold', 'cyan')} {style('[y/N/always]', 'magenta')} ").strip().lower()
     if answer == "always":
         updated = remember_apply_patch(config)
         save_config(updated)
@@ -337,7 +355,7 @@ def run_task(
         return 1
 
     section("Patch Preview")
-    print(patch_summary(patch))
+    print(colorize_patch(patch_summary(patch)))
 
     should_apply = apply_requested
     if not should_apply:
@@ -364,7 +382,7 @@ def interactive(args: argparse.Namespace) -> int:
         print(footer_hint("enter to send", "Ctrl-D to exit", "--help for options"))
         while True:
             try:
-                task = input("xninja> ").strip()
+                task = input(style("xninja> ", "bold", "magenta")).strip()
             except EOFError:
                 print()
                 return 0

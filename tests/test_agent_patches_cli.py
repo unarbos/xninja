@@ -8,6 +8,7 @@ import pytest
 from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, run_agent
 from xninja.cli import (
     brand,
+    colorize_patch,
     build_parser,
     build_prompt_parser,
     color_enabled,
@@ -244,3 +245,11 @@ def test_codex_style_helpers_are_compact(monkeypatch):
     assert fmt_elapsed_compact(3661) == "1h 01m 01s"
     assert working_status() == "Working (0s • Ctrl-C to interrupt)"
     assert footer_hint("enter to send", "Ctrl-D to exit") == "enter to send · Ctrl-D to exit"
+    assert colorize_patch("+added\n-removed") == "+added\n-removed"
+
+
+def test_color_max_helpers_add_ansi_when_enabled(monkeypatch):
+    monkeypatch.setenv("XNINJA_COLOR", "always")
+
+    assert "\033[" in meta("model", "test")
+    assert "\033[" in colorize_patch("+added\n-removed")
