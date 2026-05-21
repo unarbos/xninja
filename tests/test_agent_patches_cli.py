@@ -25,7 +25,14 @@ from xninja.cli import (
     style,
     working_status,
 )
-from xninja.patches import apply_patch, patch_text, repo_is_git_worktree
+from xninja.patches import (
+    apply_patch,
+    changed_files,
+    check_patch,
+    patch_line_counts,
+    patch_text,
+    repo_is_git_worktree,
+)
 
 
 def init_repo(path: Path) -> None:
@@ -67,6 +74,44 @@ index ce01362..cc628cc 100644
 
     assert result.returncode == 0
     assert (tmp_path / "hello.txt").read_text(encoding="utf-8") == "hello ninja\n"
+
+
+def test_patch_stats_are_computed_from_unified_diff():
+    patch = """diff --git a/hello.txt b/hello.txt
+--- a/hello.txt
++++ b/hello.txt
+@@ -1,2 +1,3 @@
+ hello
+-old
++new
++extra
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -1 +1 @@
+-print('old')
++print('new')
+"""
+
+    assert changed_files(patch) == ("hello.txt", "src/app.py")
+    assert patch_line_counts(patch) == (3, 2)
+
+
+def test_check_patch_does_not_mutate_repo(tmp_path):
+    init_repo(tmp_path)
+    patch = """diff --git a/hello.txt b/hello.txt
+index ce01362..cc628cc 100644
+--- a/hello.txt
++++ b/hello.txt
+@@ -1 +1 @@
+-hello
++hello checked
+"""
+
+    result = check_patch(tmp_path, patch)
+
+    assert result.returncode == 0
+    assert (tmp_path / "hello.txt").read_text(encoding="utf-8") == "hello\n"
 
 
 def test_repo_is_git_worktree(tmp_path):
@@ -280,7 +325,7 @@ def test_failed_patch_apply_message_is_clear(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert code != 0
-    assert "Patch did not apply cleanly" in captured.err
+    assert "git apply --check failed" in captured.err
 
 
 def test_cli_version_smoke(capsys):

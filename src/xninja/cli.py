@@ -22,7 +22,15 @@ from xninja.config import (
     save_config,
 )
 from xninja.models import OPENROUTER_API_BASE, RECOMMENDED_MODELS, resolve_model
-from xninja.patches import apply_patch, patch_summary, patch_text, repo_is_git_worktree
+from xninja.patches import (
+    apply_patch,
+    changed_files,
+    check_patch,
+    patch_line_counts,
+    patch_summary,
+    patch_text,
+    repo_is_git_worktree,
+)
 from xninja.permissions import apply_patch_allowed, remember_apply_patch
 
 
@@ -243,6 +251,32 @@ def list_models(config: XninjaConfig) -> int:
     return 0
 
 
+def patch_stat_line(patch: str) -> str:
+    files = changed_files(patch)
+    added, deleted = patch_line_counts(patch)
+    file_word = "file" if len(files) == 1 else "files"
+    return f"{len(files)} {file_word} changed · {style('+' + str(added), 'green')} {style('-' + str(deleted), 'red')}"
+
+
+def print_patch_safety(repo_path: Path, patch: str) -> subprocess.CompletedProcess[str]:
+    section("Patch Check")
+    print(transcript_line("changes", patch_stat_line(patch)))
+    files = changed_files(patch)
+    if files:
+        shown = ", ".join(files[:6])
+        if len(files) > 6:
+            shown += f", ... plus {len(files) - 6} more"
+        print(transcript_line("files", shown))
+    check = check_patch(repo_path, patch)
+    if check.returncode == 0:
+        success("git apply --check passed")
+    else:
+        error("git apply --check failed. No files were changed by xninja.")
+        print(check.stdout, end="")
+        print(check.stderr, end="", file=sys.stderr)
+    return check
+
+
 def prompt_apply(config: XninjaConfig) -> tuple[bool, XninjaConfig]:
     if apply_patch_allowed(config):
         return True, config
@@ -377,6 +411,9 @@ def run_task(
 
     section("Patch Preview")
     print(colorize_patch(patch_summary(patch)))
+    check = print_patch_safety(repo_path, patch)
+    if check.returncode != 0:
+        return check.returncode
 
     should_apply = apply_requested
     if not should_apply:
@@ -387,7 +424,7 @@ def run_task(
 
     applied = apply_patch(repo_path, patch)
     if applied.returncode != 0:
-        error("Patch did not apply cleanly. No files were changed by xninja.")
+        error("Patch apply failed after a clean check. No files were changed by xninja.")
         print(applied.stdout, end="")
         print(applied.stderr, end="", file=sys.stderr)
         return applied.returncode
