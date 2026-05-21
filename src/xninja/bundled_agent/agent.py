@@ -259,6 +259,37 @@ def _safe_join_logs(logs: List[str]) -> str:
     return _truncate(joined, MAX_TOTAL_LOG_CHARS)
 
 
+_STREAM_ANSI_CODES = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "red": "\033[31m",
+    "green": "\033[32m",
+    "cyan": "\033[36m",
+    "magenta": "\033[35m",
+}
+
+
+def _stream_color_enabled() -> bool:
+    selected = os.environ.get("XNINJA_COLOR", "auto")
+    if selected == "always":
+        return True
+    if selected == "never":
+        return False
+    return os.environ.get("NO_COLOR") is None and os.environ.get("TERM") != "dumb"
+
+
+def _stream_style(text: str, *names: str) -> str:
+    if not _stream_color_enabled():
+        return text
+    prefix = "".join(_STREAM_ANSI_CODES[name] for name in names if name in _STREAM_ANSI_CODES)
+    return f"{prefix}{text}{_STREAM_ANSI_CODES['reset']}" if prefix else text
+
+
+def _stream_pair(label: str, value: str, color: str = "cyan") -> str:
+    return f"{_stream_style(label + ':', 'bold', color)} {value}"
+
+
 class _StreamingLogList(list):
     def append(self, item: str) -> None:
         super().append(item)
@@ -345,7 +376,8 @@ def _render_observation(item: str) -> List[str]:
         verb = "edited"
     elif _looks_like_test_command(command):
         verb = "tested"
-    lines = [f"{verb}: {command_head} (exit {exit_code or '?'})"]
+    color = "green" if exit_code == "0" else "red"
+    lines = [_stream_pair(verb, f"{command_head} (exit {exit_code or '?'})", color)]
     if exit_code == "0" and not stderr.strip():
         lines.extend(_render_success_output(command, stdout))
         return lines
@@ -373,20 +405,20 @@ def _render_model_response(item: str) -> List[str]:
     if plans:
         first_plan = _first_nonempty_lines(plans[0], 1)
         if first_plan:
-            lines.append("thinking: " + _clip_stream_text(first_plan[0], 180))
+            lines.append(_stream_pair("thinking", _clip_stream_text(first_plan[0], 180), "cyan"))
     edits = _extract_edit_summaries(body)
     if edits:
-        lines.extend(edit.replace("Edit:", "edit:", 1) for edit in edits[:4])
+        lines.extend(_stream_style(edit.replace("Edit:", "edit:", 1), "green") for edit in edits[:4])
         if len(edits) > 4:
-            lines.append(f"edit: ... plus {len(edits) - 4} more")
+            lines.append(_stream_style(f"edit: ... plus {len(edits) - 4} more", "green"))
     commands = _extract_tag_text(body, "command")
     if commands:
         summarized = _summarize_commands(commands, limit=3)
-        lines.append("tools: " + "; ".join(summarized))
+        lines.append(_stream_pair("tools", "; ".join(summarized), "cyan"))
     for final in _extract_tag_text(body, "final"):
-        lines.append("final: " + _clip_stream_text(final, 350).replace("\n", " "))
+        lines.append(_stream_pair("final", _clip_stream_text(final, 350).replace("\n", " "), "green"))
     if not lines:
-        lines.append("model response received")
+        lines.append(_stream_style("model response received", "cyan"))
     return lines
 
 def _render_log_item(item: str) -> List[str]:
@@ -395,17 +427,19 @@ def _render_log_item(item: str) -> List[str]:
         return []
     step_match = re.search(r"===== STEP (\d+) =====", stripped)
     if step_match:
-        return [f"step {step_match.group(1)}"]
+        return ["", _stream_style(f"Step {step_match.group(1)}", "bold", "magenta")]
     if stripped.startswith("MODEL_WAIT:"):
-        return []
+        waited_match = re.search(r"waited=(\d+)s", stripped)
+        waited = waited_match.group(1) + "s" if waited_match else "still running"
+        return [_stream_pair("waiting", waited, "magenta")]
     if "MODEL_RESPONSE:" in stripped:
         return _render_model_response(stripped)
     if "OBSERVATION" in stripped and "COMMAND:" in stripped:
         return _render_observation(stripped)
     if "QUEUED" in stripped or stripped.startswith(("AUTO_STOP", "PATCH_READY", "PATCH_RETURN", "FINAL_SUMMARY")):
-        return [_clip_stream_text(stripped).replace("\n", " | ")]
+        return [_stream_style(_clip_stream_text(stripped).replace("\n", " | "), "magenta")]
     if stripped.startswith("MODEL_ERROR"):
-        return [_clip_stream_text(stripped).replace("\n", " | ")]
+        return [_stream_style(_clip_stream_text(stripped).replace("\n", " | "), "red")]
     return []
 
 

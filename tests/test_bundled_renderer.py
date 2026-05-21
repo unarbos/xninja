@@ -38,8 +38,8 @@ hello
 
 
 def test_render_wait_and_step_lines():
-    assert _render_log_item("\n\n===== STEP 2 =====\n") == ["step 2"]
-    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=30s") == []
+    assert _render_log_item("\n\n===== STEP 2 =====\n") == ["", "Step 2"]
+    assert _render_log_item("MODEL_WAIT: step=1 attempt=1 waited=30s") == ["waiting: 30s"]
 
 
 def test_render_edit_success_keeps_short_result():
@@ -116,3 +116,10 @@ def test_render_model_response_summarizes_many_tools():
     assert _render_log_item(item) == [
         "tools: cat a.py; cat b.py; cat c.py; ... plus 2 more",
     ]
+
+
+def test_rendered_stream_lines_can_be_colored(monkeypatch):
+    monkeypatch.setenv("XNINJA_COLOR", "always")
+
+    assert "\033[" in _render_log_item("\n\n===== STEP 2 =====\n")[1]
+    assert "\033[" in _render_log_item("MODEL_RESPONSE:\n<final>Done</final>")[0]

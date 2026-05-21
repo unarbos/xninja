@@ -83,14 +83,20 @@ def fmt_elapsed_compact(elapsed_secs: int) -> str:
     return f"{hours}h {minutes:02}m {seconds:02}s"
 
 
-def working_status(elapsed_secs: int = 0, interrupt_hint: str = "Ctrl-C") -> str:
-    elapsed = fmt_elapsed_compact(elapsed_secs)
-    return f"{style('Working', 'bold', 'cyan')} {style(f'({elapsed} • {interrupt_hint} to interrupt)', 'magenta')}"
+def working_status(elapsed_secs: int | None = None, interrupt_hint: str = "Ctrl-C") -> str:
+    details = f"{interrupt_hint} to interrupt"
+    if elapsed_secs is not None:
+        details = f"{fmt_elapsed_compact(elapsed_secs)} • {details}"
+    return f"{style('Working', 'bold', 'cyan')} {style(f'({details})', 'magenta')}"
 
 
 def colorize_patch_line(line: str) -> str:
-    if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+    if line.startswith("@@"):
         return style(line, "bold", "cyan")
+    if line.startswith("+++"):
+        return style(line, "bold", "green")
+    if line.startswith("---"):
+        return style(line, "bold", "red")
     if line.startswith("+"):
         return style(line, "green")
     if line.startswith("-"):

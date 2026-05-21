@@ -243,7 +243,8 @@ def test_codex_style_helpers_are_compact(monkeypatch):
     assert fmt_elapsed_compact(0) == "0s"
     assert fmt_elapsed_compact(61) == "1m 01s"
     assert fmt_elapsed_compact(3661) == "1h 01m 01s"
-    assert working_status() == "Working (0s • Ctrl-C to interrupt)"
+    assert working_status() == "Working (Ctrl-C to interrupt)"
+    assert working_status(61) == "Working (1m 01s • Ctrl-C to interrupt)"
     assert footer_hint("enter to send", "Ctrl-D to exit") == "enter to send · Ctrl-D to exit"
     assert colorize_patch("+added\n-removed") == "+added\n-removed"
 
