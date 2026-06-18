@@ -5,23 +5,29 @@ from pathlib import Path
 
 import pytest
 
-from xninja.agent import AgentSource, bundled_agent_source, load_agent_module, local_agent_source, run_agent
+from xninja.agent import (
+    AgentSource,
+    bundled_agent_source,
+    load_agent_module,
+    local_agent_source,
+    manifest_files,
+    run_agent,
+)
 from xninja.cli import (
     brand,
-    colorize_patch,
     build_parser,
     build_prompt_parser,
     color_enabled,
-    commit_agent_baseline,
+    colorize_log,
+    colorize_patch,
     copy_repo_for_agent,
-    main,
-    footer_hint,
     fmt_elapsed_compact,
+    footer_hint,
+    main,
     meta,
     parse_args,
     printable_agent_logs,
     select_agent_source,
-    stream_agent_logs_enabled,
     style,
     working_status,
 )
@@ -52,11 +58,22 @@ def test_bundled_agent_metadata_loads():
     assert source.metadata["commit"]
 
 
-def test_bundled_agent_streaming_helpers_load():
+def test_bundled_agent_is_a_multi_file_bundle():
+    source = bundled_agent_source()
+
+    files = manifest_files(source.bundle_root)
+    assert "agent.py" in files
+    assert any(rel.startswith("agent/") for rel in files)
+    for rel in files:
+        assert (source.bundle_root / rel).is_file()
+
+
+def test_bundled_multi_file_agent_loads_with_package_imports():
+    # Exercises the validator-compatible load path: bundle root on sys.path so
+    # the entrypoint's `from agent.* import ...` resolves, then solve() exists.
     loaded = load_agent_module(bundled_agent_source())
 
-    assert callable(loaded.__dict__.get("_new_logs"))
-    assert callable(loaded.__dict__.get("_render_log_item"))
+    assert callable(loaded.__dict__.get("solve"))
 
 
 def test_apply_patch_changes_temp_repo(tmp_path):
@@ -206,12 +223,21 @@ def test_style_adds_ansi_when_enabled(monkeypatch):
     assert style("hello", "green").startswith("\033[32m")
 
 
-def test_stream_agent_logs_enabled_for_bundled_source(tmp_path):
-    bundled = tmp_path / "bundled_agent" / "agent.py"
-    cached = tmp_path / "cached" / "agent.py"
+def test_colorize_log_styles_step_lines(monkeypatch):
+    monkeypatch.setenv("XNINJA_COLOR", "always")
+    rendered = colorize_log("[step 1] $ pytest\nplain output line\n[step 2] model error: boom")
 
-    assert stream_agent_logs_enabled(AgentSource(bundled, {}))
-    assert not stream_agent_logs_enabled(AgentSource(cached, {}))
+    lines = rendered.splitlines()
+    assert "\033[" in lines[0]
+    assert lines[1] == "plain output line"
+    assert "\033[" in lines[2]
+
+
+def test_colorize_log_is_plain_without_color(monkeypatch):
+    monkeypatch.setenv("XNINJA_COLOR", "never")
+    text = "[step 1] assistant:\nhello"
+
+    assert colorize_log(text) == text
 
 
 def test_printable_agent_logs_formats_none_and_text():

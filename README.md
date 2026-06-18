@@ -4,12 +4,18 @@
 [`unarbos/ninja`](https://github.com/unarbos/ninja) agent like a local coding
 assistant.
 
-It bundles the latest `ninja` `agent.py` snapshot at package build time and
-calls its validator-compatible contract:
+Subnet 66 harnesses are now multi-file bundles: an `agent.py` entrypoint plus a
+stdlib-only `agent/` package (up to 32 `*.py` files), with `tau_agent_files.json`
+listing every file. `xninja` bundles the latest such snapshot at build time,
+loads it exactly the way the validator does (the bundle root goes on `sys.path`
+so the entrypoint's `from agent.* import ...` resolves), and calls its
+validator-compatible contract:
 
 ```python
 solve(repo_path, issue, model, api_base, api_key)
 ```
+
+Single-file agents (just `agent.py`) remain fully supported.
 
 ## Install
 
@@ -95,17 +101,21 @@ Show bundled metadata:
 xninja agent info
 ```
 
-Cache and use a specific `unarbos/ninja` ref:
+Cache and use a specific `unarbos/ninja` ref. The whole bundle (every file in
+`tau_agent_files.json`) is fetched, not just `agent.py`:
 
 ```bash
 xninja agent update --ref cec561e45192042687c053237c1db503cd7d3ae0
 xninja run --agent-ref cec561e45192042687c053237c1db503cd7d3ae0 "fix the issue"
 ```
 
-Use your own compatible local `agent.py`:
+Use your own compatible local agent. `--agent-path` accepts either a single
+`agent.py` or a bundle directory containing `agent.py` (and, optionally, an
+`agent/` package and a `tau_agent_files.json` manifest):
 
 ```bash
 xninja run --agent-path ./agent.py "fix the issue"
+xninja run --agent-path ./my_bundle "fix the issue"
 xninja --agent-path ~/agents/my_agent.py "fix the issue"
 ```
 
@@ -115,6 +125,10 @@ Custom agents must expose the same callable contract as the bundled agent:
 def solve(repo_path, issue, model, api_base, api_key):
     return {"patch": "", "logs": "", "steps": 0, "cost": None, "success": True}
 ```
+
+For a multi-file bundle, `agent.py` is the entrypoint and may import its
+supporting modules (`from agent.foo import bar`); list every file, including
+`agent.py`, in `tau_agent_files.json`.
 
 ## Models
 

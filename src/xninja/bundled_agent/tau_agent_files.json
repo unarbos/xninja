@@ -1,0 +1,11 @@
+[
+  "agent.py",
+  "agent/__init__.py",
+  "agent/agent_loop.py",
+  "agent/criteria.py",
+  "agent/environment.py",
+  "agent/guards.py",
+  "agent/model.py",
+  "agent/prompts.py",
+  "agent/repo_diff.py"
+]
