@@ -7,13 +7,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from xninja.models import DEFAULT_MODEL
+from xninja.models import DEFAULT_MODEL, OPENROUTER_API_BASE
 
 
 @dataclass(frozen=True)
 class XninjaConfig:
     openrouter_api_key: str = ""
     default_model: str = DEFAULT_MODEL
+    # OpenAI-compatible inference endpoint. Defaults to OpenRouter; point it at a
+    # managed proxy (e.g. via XNINJA_API_BASE) to route elsewhere — the bundled
+    # agent just builds {api_base}/chat/completions with the api key as a Bearer.
+    api_base: str = OPENROUTER_API_BASE
     allowed_shell_commands: tuple[str, ...] = field(default_factory=tuple)
     allow_apply_patch: bool = False
 
@@ -48,6 +52,7 @@ def parse_config(raw: dict[str, Any]) -> XninjaConfig:
     return XninjaConfig(
         openrouter_api_key=str(raw.get("openrouter_api_key") or ""),
         default_model=str(raw.get("default_model") or DEFAULT_MODEL),
+        api_base=str(raw.get("api_base") or OPENROUTER_API_BASE),
         allowed_shell_commands=tuple(str(item) for item in raw.get("allowed_shell_commands", [])),
         allow_apply_patch=bool(raw.get("allow_apply_patch", False)),
     )
@@ -74,6 +79,7 @@ def config_with_env(config: XninjaConfig, env: dict[str, str] | None = None) -> 
     return XninjaConfig(
         openrouter_api_key=values.get("OPENROUTER_API_KEY") or config.openrouter_api_key,
         default_model=values.get("XNINJA_MODEL") or config.default_model,
+        api_base=values.get("XNINJA_API_BASE") or config.api_base,
         allowed_shell_commands=config.allowed_shell_commands,
         allow_apply_patch=config.allow_apply_patch,
     )

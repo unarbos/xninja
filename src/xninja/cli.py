@@ -31,7 +31,7 @@ from xninja.config import (
     redact_secret,
     save_config,
 )
-from xninja.models import OPENROUTER_API_BASE, RECOMMENDED_MODELS, resolve_model
+from xninja.models import RECOMMENDED_MODELS, resolve_model
 from xninja.patches import (
     apply_patch,
     changed_files,
@@ -283,6 +283,7 @@ def print_config(config: XninjaConfig) -> None:
     print(meta("config", config_path()))
     print(meta("openrouter_api_key", redact_secret(config.openrouter_api_key)))
     print(meta("default_model", config.default_model))
+    print(meta("api_base", config.api_base))
     print(meta("allow_apply_patch", config.allow_apply_patch))
     allowed = ", ".join(config.allowed_shell_commands) or "(none)"
     print(meta("allowed_shell_commands", allowed))
@@ -438,7 +439,7 @@ def run_task(
             with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
                 work_repo = copy_repo_for_agent(repo_path, Path(work_root))
                 commit_agent_baseline(work_repo)
-                result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
+                result = run_agent(source, work_repo, task, model, config.api_base, api_key)
         finally:
             stop_spinner()
 

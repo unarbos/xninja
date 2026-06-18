@@ -39,6 +39,16 @@ def test_env_overrides_secret_and_model():
     assert config.default_model == "stored-model"
 
 
+def test_env_overrides_api_base():
+    config = XninjaConfig()  # defaults to OpenRouter
+    env = {"XNINJA_API_BASE": "https://proxy.example/v1"}
+
+    resolved = config_with_env(config, env)
+
+    assert resolved.api_base == "https://proxy.example/v1"
+    assert config.api_base == "https://openrouter.ai/api/v1"
+
+
 def test_config_with_empty_env_preserves_stored_values():
     config = XninjaConfig(openrouter_api_key="stored", default_model="stored-model")
 
