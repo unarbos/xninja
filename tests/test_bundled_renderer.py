@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import pytest
+
 from xninja.bundled_agent.agent import (
     _StreamingLogList,
     _render_log_item,
     _start_model_wait_heartbeat,
     _stream_delta_text,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_stream_color(monkeypatch):
+    # These tests assert on rendered output structure, so pin color off to keep
+    # ambient TERM/NO_COLOR from leaking ANSI codes into the comparisons. Tests
+    # that exercise the color path override XNINJA_COLOR themselves.
+    monkeypatch.setenv("XNINJA_COLOR", "never")
 
 
 def test_render_model_response_as_transcript_lines():
