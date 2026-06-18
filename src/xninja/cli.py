@@ -3,16 +3,26 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 from xninja import __version__
-from xninja.agent import bundled_agent_source, local_agent_source, resolve_agent_source, run_agent, update_cached_agent
+from xninja.agent import (
+    bundled_agent_source,
+    local_agent_source,
+    resolve_agent_source,
+    run_agent,
+    update_cached_agent,
+)
 from xninja.config import (
     XninjaConfig,
     config_path,
@@ -32,7 +42,6 @@ from xninja.patches import (
     repo_is_git_worktree,
 )
 from xninja.permissions import apply_patch_allowed, remember_apply_patch
-
 
 ANSI_CODES = {
     "reset": "\033[0m",
@@ -119,6 +128,60 @@ def colorize_patch_line(line: str) -> str:
 
 def colorize_patch(text: str) -> str:
     return "\n".join(colorize_patch_line(line) for line in text.splitlines())
+
+
+_LOG_STEP_RE = re.compile(r"^(\[step \d+\])(.*)$")
+
+
+def colorize_log_line(line: str) -> str:
+    match = _LOG_STEP_RE.match(line)
+    if not match:
+        return line
+    head, rest = match.group(1), match.group(2)
+    if "model error" in rest or "format retry" in rest:
+        rest = style(rest, "red")
+    elif rest.lstrip().startswith("$"):
+        rest = style(rest, "green")
+    else:
+        rest = style(rest, "cyan")
+    return style(head, "bold", "magenta") + rest
+
+
+def colorize_log(text: str) -> str:
+    return "\n".join(colorize_log_line(line) for line in text.splitlines())
+
+
+def start_working_spinner() -> Callable[[], None]:
+    """Show a live elapsed-time status while the agent runs.
+
+    On a color-capable tty this animates a single rewritten line; otherwise it
+    prints the status once. Returns a callable that stops and clears it.
+    """
+    stop = threading.Event()
+    if not (sys.stdout.isatty() and color_enabled()):
+        print(working_status())
+        return stop.set
+
+    start = time.monotonic()
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def beat() -> None:
+        index = 0
+        while not stop.wait(0.12):
+            elapsed = int(time.monotonic() - start)
+            frame = style(frames[index % len(frames)], "bold", "magenta")
+            print(f"\r{frame} {working_status(elapsed)}", end="", flush=True)
+            index += 1
+        print("\r\033[K", end="", flush=True)
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+
+    def stop_spinner() -> None:
+        stop.set()
+        thread.join(timeout=0.5)
+
+    return stop_spinner
 
 
 def footer_hint(*parts: str) -> str:
@@ -319,10 +382,6 @@ def commit_agent_baseline(repo_path: Path) -> None:
         raise RuntimeError(result.stderr or result.stdout or "failed to create xninja baseline commit")
 
 
-def stream_agent_logs_enabled(source: object) -> bool:
-    return source is not None and "bundled_agent" in str(getattr(source, "path", ""))
-
-
 def select_agent_source(agent_ref: str | None, agent_path: str | None):
     if agent_path:
         return local_agent_source(agent_path)
@@ -368,68 +427,59 @@ def run_task(
         return 2
     previous_color = os.environ.get("XNINJA_COLOR")
     os.environ["XNINJA_COLOR"] = color
-    section("xninja")
-    print(transcript_line("user", task))
-    print(transcript_line("model", model))
-    print(transcript_line("cwd", repo_path))
-    stream_logs = stream_agent_logs_enabled(source)
-    print(working_status())
-
-    previous_stream_setting = os.environ.get("XNINJA_STREAM_LOGS")
-    previous_model_stream_setting = os.environ.get("XNINJA_STREAM_MODEL")
-    if stream_logs:
-        os.environ["XNINJA_STREAM_LOGS"] = "raw" if raw_logs else "rendered"
-        if raw_logs:
-            os.environ["XNINJA_STREAM_MODEL"] = "1"
     try:
-        with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
-            work_repo = copy_repo_for_agent(repo_path, Path(work_root))
-            commit_agent_baseline(work_repo)
-            result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
+        section("xninja")
+        print(transcript_line("user", task))
+        print(transcript_line("model", model))
+        print(transcript_line("cwd", repo_path))
+
+        stop_spinner = start_working_spinner()
+        try:
+            with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
+                work_repo = copy_repo_for_agent(repo_path, Path(work_root))
+                commit_agent_baseline(work_repo)
+                result = run_agent(source, work_repo, task, model, OPENROUTER_API_BASE, api_key)
+        finally:
+            stop_spinner()
+
+        patch = patch_text(result)
+        logs = printable_agent_logs(result.get("logs"))
+        message = result.get("message")
+        if message:
+            print(transcript_line("status", message))
+        if logs:
+            section("Transcript")
+            print(logs if raw_logs else colorize_log(logs))
+        if not patch.strip():
+            warn("\nAgent returned no patch.")
+            return 1
+
+        section("Patch Preview")
+        print(colorize_patch(patch_summary(patch)))
+        check = print_patch_safety(repo_path, patch)
+        if check.returncode != 0:
+            return check.returncode
+
+        should_apply = apply_requested
+        if not should_apply:
+            should_apply, _ = prompt_apply(stored_config)
+        if not should_apply:
+            info("Patch left unapplied.")
+            return 0
+
+        applied = apply_patch(repo_path, patch)
+        if applied.returncode != 0:
+            error("Patch apply failed after a clean check. No files were changed by xninja.")
+            print(applied.stdout, end="")
+            print(applied.stderr, end="", file=sys.stderr)
+            return applied.returncode
+        success("Patch applied.")
+        return 0
     finally:
-        if stream_logs:
-            if previous_stream_setting is None:
-                os.environ.pop("XNINJA_STREAM_LOGS", None)
-            else:
-                os.environ["XNINJA_STREAM_LOGS"] = previous_stream_setting
-            if previous_model_stream_setting is None:
-                os.environ.pop("XNINJA_STREAM_MODEL", None)
-            else:
-                os.environ["XNINJA_STREAM_MODEL"] = previous_model_stream_setting
         if previous_color is None:
             os.environ.pop("XNINJA_COLOR", None)
         else:
             os.environ["XNINJA_COLOR"] = previous_color
-    patch = patch_text(result)
-    logs = printable_agent_logs(result.get("logs"))
-    if logs and not stream_logs:
-        section("Thinking Trace")
-        print(logs)
-    if not patch.strip():
-        warn("\nAgent returned no patch.")
-        return 1
-
-    section("Patch Preview")
-    print(colorize_patch(patch_summary(patch)))
-    check = print_patch_safety(repo_path, patch)
-    if check.returncode != 0:
-        return check.returncode
-
-    should_apply = apply_requested
-    if not should_apply:
-        should_apply, _ = prompt_apply(stored_config)
-    if not should_apply:
-        info("Patch left unapplied.")
-        return 0
-
-    applied = apply_patch(repo_path, patch)
-    if applied.returncode != 0:
-        error("Patch apply failed after a clean check. No files were changed by xninja.")
-        print(applied.stdout, end="")
-        print(applied.stderr, end="", file=sys.stderr)
-        return applied.returncode
-    success("Patch applied.")
-    return 0
 
 
 def interactive(args: argparse.Namespace) -> int:
