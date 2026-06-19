@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import shutil
 import subprocess
@@ -154,6 +155,17 @@ def load_agent_module(source: AgentSource) -> ModuleType:
     return module
 
 
+def _solve_accepts(fn, name: str) -> bool:
+    """Whether solve() takes a given keyword (named param or **kwargs)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if name in params:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 def run_agent(
     source: AgentSource,
     repo_path: Path,
@@ -161,19 +173,25 @@ def run_agent(
     model: str,
     api_base: str,
     api_key: str,
+    on_event=None,
 ) -> dict[str, Any]:
     module = load_agent_module(source)
     solve = getattr(module, "solve", None)
     if not callable(solve):
         raise RuntimeError(f"Agent at {source.path} does not define callable solve(...)")
+    kwargs = dict(
+        repo_path=str(repo_path),
+        issue=issue,
+        model=model,
+        api_base=api_base,
+        api_key=api_key,
+    )
+    # Only forward on_event to agents whose solve() accepts it — third-party or
+    # older agents follow the public 5-arg contract and must keep working.
+    if on_event is not None and _solve_accepts(solve, "on_event"):
+        kwargs["on_event"] = on_event
     try:
-        result = solve(
-            repo_path=str(repo_path),
-            issue=issue,
-            model=model,
-            api_base=api_base,
-            api_key=api_key,
-        )
+        result = solve(**kwargs)
     except Exception as exc:
         raise RuntimeError(f"Agent solve(...) raised an exception: {exc}") from exc
     if not isinstance(result, dict):

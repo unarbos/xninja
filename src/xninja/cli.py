@@ -151,6 +151,50 @@ def colorize_log(text: str) -> str:
     return "\n".join(colorize_log_line(line) for line in text.splitlines())
 
 
+def make_stream_printer() -> tuple[Callable[[dict], None], dict]:
+    """Render agent_loop events to stdout live, returning (emit, state).
+
+    `state["saw"]` records whether any agent output was streamed — the caller
+    falls back to the buffered logs (e.g. a crash traceback) when nothing was.
+    Writes are flushed per event so the runner/terminal shows progress in real
+    time instead of waiting for the whole turn to finish.
+    """
+    state = {"mid_line": False, "saw": False}
+
+    def close_line() -> None:
+        if state["mid_line"]:
+            sys.stdout.write("\n")
+            state["mid_line"] = False
+
+    def emit(event: dict) -> None:
+        kind = event.get("type")
+        if kind == "token":
+            text = event.get("text") or ""
+            sys.stdout.write(text)
+            state["mid_line"] = not text.endswith("\n")
+            state["saw"] = True
+        elif kind == "step":
+            close_line()
+            sys.stdout.write("\n" + style(f"[step {event.get('n')}]", "bold", "magenta") + "\n")
+            state["saw"] = True
+        elif kind == "result":
+            close_line()
+            out = (event.get("output") or "").rstrip()
+            sys.stdout.write(style("→ output", "dim") + "\n")
+            if out:
+                sys.stdout.write(out + "\n")
+            state["saw"] = True
+        elif kind == "phase":
+            close_line()
+            sys.stdout.write("\n" + style(f"— {event.get('label')} pass —", "bold", "cyan") + "\n")
+        elif kind == "notice":
+            close_line()
+            sys.stdout.write(style(f"[{event.get('text')}]", "dim") + "\n")
+        sys.stdout.flush()
+
+    return emit, state
+
+
 def start_working_spinner() -> Callable[[], None]:
     """Show a live elapsed-time status while the agent runs.
 
@@ -434,21 +478,34 @@ def run_task(
         print(transcript_line("model", model))
         print(transcript_line("cwd", repo_path))
 
-        stop_spinner = start_working_spinner()
+        # Stream the agent's work live (tokens, commands, results) so a long run
+        # shows progress instead of a silent spinner. `--raw-logs` opts back into
+        # the old buffered-at-the-end transcript for plain/deterministic output.
+        streaming = not raw_logs
+        on_event, printer_state = make_stream_printer() if streaming else (None, {})
+        if streaming:
+            section("Transcript")
+        stop_spinner = (lambda: None) if streaming else start_working_spinner()
         try:
             with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
                 work_repo = copy_repo_for_agent(repo_path, Path(work_root))
                 commit_agent_baseline(work_repo)
-                result = run_agent(source, work_repo, task, model, config.api_base, api_key)
+                result = run_agent(
+                    source, work_repo, task, model, config.api_base, api_key, on_event=on_event
+                )
         finally:
             stop_spinner()
 
         patch = patch_text(result)
         logs = printable_agent_logs(result.get("logs"))
         message = result.get("message")
+        if streaming and printer_state.get("saw"):
+            print()  # close the live transcript before the status line
         if message:
             print(transcript_line("status", message))
-        if logs:
+        # Skip the buffered dump when we already streamed it; still show it when
+        # streaming produced nothing (e.g. a crash before the first step).
+        if logs and (not streaming or not printer_state.get("saw")):
             section("Transcript")
             print(logs if raw_logs else colorize_log(logs))
         if not patch.strip():

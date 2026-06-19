@@ -453,6 +453,7 @@ def solve(
     max_steps: int = DEFAULT_MAX_STEPS,
     command_timeout: int = DEFAULT_COMMAND_TIMEOUT,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    on_event=None,
 ) -> Dict[str, Any]:
     started = time.monotonic()
     try:
@@ -472,6 +473,7 @@ def solve(
         outcome = run_agent_loop(
             config=run_config,
             task=build_initial_user_prompt(issue, "", ""),
+            on_event=on_event,
         )
 
         repair_note = ""
@@ -500,9 +502,12 @@ def solve(
                     task_prompt = build_initial_user_prompt(_build_polish_task(issue, message), "", "")
                 else:
                     task_prompt = build_initial_user_prompt(_build_repair_task(issue, message), "", "")
+                if on_event:
+                    on_event({"type": "phase", "label": kind})
                 repaired = run_agent_loop(
                     config=repair_config,
                     task=task_prompt,
+                    on_event=on_event,
                 )
                 rp = repaired.patch
                 if rp.strip() and not _syntax_errors(repo_path, rp) and patch_acceptable(rp):

@@ -36,16 +36,35 @@ class ChatModel:
         self.prompt_tokens = 0
         self.completion_tokens = 0
 
-    def query(self, messages: list) -> str:
-        """Send the conversation and return the assistant message text."""
+    def query(self, messages: list, on_delta=None) -> str:
+        """Send the conversation and return the assistant message text.
+
+        When ``on_delta`` is given, stream the completion (SSE) and call
+        ``on_delta(piece)`` for each reasoning/content delta as it arrives, so a
+        caller can render the model's output live instead of waiting for the full
+        reply. Without it, behaviour is the original single-shot request.
+        """
+        streaming = on_delta is not None
         payload = {"model": self.model_name, "messages": messages}
         if self.max_completion_tokens > 0:
             payload["max_tokens"] = self.max_completion_tokens
+        if streaming:
+            payload["stream"] = True
         body = json.dumps(payload).encode("utf-8")
         last_error = "unknown error"
+        emitted = 0
+
+        def _emit(piece: str) -> None:
+            nonlocal emitted
+            emitted += 1
+            on_delta(piece)
+
         for attempt in range(1, self.max_attempts + 1):
             try:
-                raw = self._post(body)
+                if streaming:
+                    text = self._post_stream(body, _emit)
+                else:
+                    text = self._extract_content(self._post(body))
             except urllib.error.HTTPError as exc:
                 detail = _read_error_body(exc)
                 last_error = f"HTTP {exc.code}: {detail[:300]}"
@@ -53,17 +72,22 @@ class ChatModel:
                     raise ModelQueryError(f"model request was rejected: {last_error}") from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
+                # Once a stream has printed tokens, a silent retry would duplicate
+                # the visible output — end the round on the error instead.
+                if emitted:
+                    raise ModelQueryError(
+                        f"stream interrupted after {emitted} chunk(s): {last_error}"
+                    ) from exc
+            except _TransientContentError as exc:
+                # 200-OK but unusable (Google soft-empty/finish_reason=error):
+                # fall through to the existing backoff and retry in-place rather
+                # than forfeit the round — unless we already streamed partial text.
+                last_error = f"{type(exc).__name__}: {exc}"
+                if emitted:
+                    raise ModelQueryError(f"stream produced unusable content: {last_error}") from exc
             else:
-                try:
-                    text = self._extract_content(raw)
-                except _TransientContentError as exc:
-                    # 200-OK but unusable (Google soft-empty/finish_reason=error):
-                    # fall through to the existing backoff and retry in-place
-                    # rather than forfeit the round.
-                    last_error = f"{type(exc).__name__}: {exc}"
-                else:
-                    self.calls += 1
-                    return text
+                self.calls += 1
+                return text
             if attempt < self.max_attempts:
                 time.sleep(min(20.0, 1.5 ** attempt))
         raise ModelQueryError(f"model request failed after {self.max_attempts} attempts: {last_error}")
@@ -80,6 +104,71 @@ class ChatModel:
         )
         with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
             return response.read().decode("utf-8", errors="replace")
+
+    def _post_stream(self, body: bytes, on_delta) -> str:
+        """POST with stream=true, emit each SSE delta via on_delta, return the
+        full assistant *content* (reasoning is streamed for display only, never
+        folded into the text the agent loop parses for its command block).
+
+        If the upstream ignores ``stream`` and returns a single JSON completion,
+        fall back to extracting it whole — so a non-streaming provider still works.
+        """
+        request = urllib.request.Request(
+            self.endpoint,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.auth_token}",
+                "Accept": "text/event-stream",
+            },
+            method="POST",
+        )
+        parts: list = []
+        buffered: list = []
+        saw_sse = False
+        with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                stripped = line.strip()
+                if not stripped.startswith("data:"):
+                    if not saw_sse:
+                        buffered.append(line)  # may be a non-SSE JSON body
+                    continue
+                saw_sse = True
+                data = stripped[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                if not isinstance(chunk, dict):
+                    continue
+                usage = chunk.get("usage")
+                if isinstance(usage, dict):
+                    self.prompt_tokens += _as_int(usage.get("prompt_tokens"))
+                    self.completion_tokens += _as_int(usage.get("completion_tokens"))
+                choices = chunk.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    continue
+                delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+                if not isinstance(delta, dict):
+                    continue
+                reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                if isinstance(reasoning, str) and reasoning:
+                    on_delta(reasoning)
+                piece = delta.get("content")
+                if isinstance(piece, str) and piece:
+                    parts.append(piece)
+                    on_delta(piece)
+        if not saw_sse:
+            text = self._extract_content("\n".join(buffered))
+            on_delta(text)
+            return text
+        text = "".join(parts)
+        if not text.strip():
+            raise _TransientContentError("stream produced empty content")
+        return text
 
     def _extract_content(self, raw: str) -> str:
         try:

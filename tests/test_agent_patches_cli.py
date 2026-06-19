@@ -335,7 +335,7 @@ def test_failed_patch_apply_message_is_clear(monkeypatch, tmp_path, capsys):
     def fake_resolve_agent_source(ref):
         return AgentSource(tmp_path / "bundled_agent" / "agent.py", {"source_repo": "fake", "ref": "fake"})
 
-    def fake_run_agent(source, repo_path, task, model, api_base, api_key):
+    def fake_run_agent(source, repo_path, task, model, api_base, api_key, on_event=None):
         return {
             "patch": "diff --git a/missing.txt b/missing.txt\n--- a/missing.txt\n+++ b/missing.txt\n@@ -1 +1 @@\n-old\n+new\n",
             "logs": "",
