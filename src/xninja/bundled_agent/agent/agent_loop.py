@@ -67,7 +67,11 @@ def run_agent_loop(*, config: AgentRunConfig, task: str, on_event=None) -> Agent
     exit_status = "LimitsExceeded"
     message = f"step limit of {config.max_steps} reached"
     format_retries = 0
-    on_delta = (lambda piece: on_event({"type": "token", "text": piece})) if on_event else None
+    on_delta = (
+        (lambda piece, channel="content": on_event({"type": "token", "text": piece, "channel": channel}))
+        if on_event
+        else None
+    )
 
     for step in range(1, max(1, config.max_steps) + 1):
         if 0 < config.wall_clock_limit <= time.monotonic() - started:
@@ -104,11 +108,16 @@ def run_agent_loop(*, config: AgentRunConfig, task: str, on_event=None) -> Agent
         format_retries = 0
         command = commands[0]
 
+        if on_event:
+            on_event({"type": "command", "n": step, "command": command})
         result = execute_command(command, cwd=config.repo_dir, timeout=config.command_timeout)
         output_text = result.get("output") or ""
+        returncode = int(result.get("returncode") or 0)
         log_lines.append(f"[step {step}] $ {command}\n{truncate_text(output_text, 2000)}")
         if on_event:
-            on_event({"type": "result", "output": truncate_text(output_text, 2000)})
+            on_event(
+                {"type": "result", "n": step, "output": truncate_text(output_text, 2000), "exit_code": returncode}
+            )
         if _is_submission(output_text, result.get("returncode")):
             exit_status = "Submitted"
             message = f"submitted after {step} step(s)"
