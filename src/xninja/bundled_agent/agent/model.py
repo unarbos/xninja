@@ -54,10 +54,10 @@ class ChatModel:
         last_error = "unknown error"
         emitted = 0
 
-        def _emit(piece: str) -> None:
+        def _emit(piece: str, channel: str = "content") -> None:
             nonlocal emitted
             emitted += 1
-            on_delta(piece)
+            on_delta(piece, channel)
 
         for attempt in range(1, self.max_attempts + 1):
             try:
@@ -156,14 +156,14 @@ class ChatModel:
                     continue
                 reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                 if isinstance(reasoning, str) and reasoning:
-                    on_delta(reasoning)
+                    on_delta(reasoning, "reasoning")
                 piece = delta.get("content")
                 if isinstance(piece, str) and piece:
                     parts.append(piece)
-                    on_delta(piece)
+                    on_delta(piece, "content")
         if not saw_sse:
             text = self._extract_content("\n".join(buffered))
-            on_delta(text)
+            on_delta(text, "content")
             return text
         text = "".join(parts)
         if not text.strip():

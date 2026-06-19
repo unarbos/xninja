@@ -58,8 +58,8 @@ def test_stream_emits_content_deltas_and_returns_full_text(monkeypatch):
         b"data: [DONE]\n",
     ])
     got = []
-    text = _model().query([{"role": "user", "content": "hi"}], on_delta=got.append)
-    assert got == ["Hello", " world"]
+    text = _model().query([{"role": "user", "content": "hi"}], on_delta=lambda p, c: got.append((p, c)))
+    assert got == [("Hello", "content"), (" world", "content")]
     assert text == "Hello world"
 
 
@@ -72,8 +72,8 @@ def test_stream_shows_reasoning_but_excludes_it_from_parsed_text(monkeypatch):
         b"data: [DONE]\n",
     ])
     got = []
-    text = _model().query([{"role": "user", "content": "hi"}], on_delta=got.append)
-    assert got == ["thinking", "```bash\necho hi\n```"]
+    text = _model().query([{"role": "user", "content": "hi"}], on_delta=lambda p, c: got.append((p, c)))
+    assert got == [("thinking", "reasoning"), ("```bash\necho hi\n```", "content")]
     assert text == "```bash\necho hi\n```"
 
 
@@ -81,9 +81,9 @@ def test_non_sse_response_falls_back_to_whole_completion(monkeypatch):
     # Upstream ignored stream=true and returned one JSON object: still works.
     _patch_urlopen(monkeypatch, [b'{"choices":[{"message":{"content":"whole answer"}}]}'])
     got = []
-    text = _model().query([{"role": "user", "content": "hi"}], on_delta=got.append)
+    text = _model().query([{"role": "user", "content": "hi"}], on_delta=lambda p, c: got.append((p, c)))
     assert text == "whole answer"
-    assert got == ["whole answer"]
+    assert got == [("whole answer", "content")]
 
 
 def test_non_streaming_query_is_unchanged(monkeypatch):

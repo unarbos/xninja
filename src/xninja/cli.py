@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import re
 import shutil
@@ -195,6 +196,142 @@ def make_stream_printer() -> tuple[Callable[[dict], None], dict]:
     return emit, state
 
 
+_SENTINEL = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+_FENCE = "```"
+
+
+class _ContentSplitter:
+    """Route a streamed assistant 'content' channel into clean segments:
+
+    - ``<think>…</think>``  -> reasoning  (collapsible thinking block)
+    - fenced ``` … ``` code -> dropped    (the executed command renders as a
+                                            tool row, so the inline copy is noise)
+    - everything else       -> message    (streamed markdown prose)
+
+    Markers split across deltas are handled by holding back a buffer tail that
+    could be the start of a marker.
+    """
+
+    def __init__(self) -> None:
+        self.state = "message"  # message | reasoning | code
+        self.buf = ""
+
+    def feed(self, text: str) -> list:
+        self.buf += text
+        out: list = []
+        while True:
+            if self.state == "message":
+                hits = [
+                    (self.buf.find("<think>"), "<think>", "reasoning"),
+                    (self.buf.find(_FENCE), _FENCE, "code"),
+                ]
+                hits = [h for h in hits if h[0] != -1]
+                if not hits:
+                    hold = max(self._partial("<think>"), self._partial(_FENCE))
+                    self._emit(out, "message", len(self.buf) - hold)
+                    break
+                idx, marker, nxt = min(hits)
+                self._emit(out, "message", idx)
+                self.buf = self.buf[len(marker):]
+                self.state = nxt
+            elif self.state == "reasoning":
+                idx = self.buf.find("</think>")
+                if idx == -1:
+                    self._emit(out, "reasoning", len(self.buf) - self._partial("</think>"))
+                    break
+                self._emit(out, "reasoning", idx)
+                self.buf = self.buf[len("</think>"):]
+                self.state = "message"
+            else:  # code — drop everything up to and including the closing fence
+                idx = self.buf.find(_FENCE)
+                if idx == -1:
+                    self.buf = self.buf[len(self.buf) - self._partial(_FENCE):]
+                    break
+                self.buf = self.buf[idx + len(_FENCE):]
+                self.state = "message"
+        return out
+
+    def _emit(self, out: list, channel: str, n: int) -> None:
+        if n > 0:
+            out.append((channel, self.buf[:n]))
+            self.buf = self.buf[n:]
+
+    def _partial(self, marker: str) -> int:
+        for k in range(min(len(marker) - 1, len(self.buf)), 0, -1):
+            if self.buf.endswith(marker[:k]):
+                return k
+        return 0
+
+    def flush(self) -> list:
+        if self.state == "code" or not self.buf:
+            self.buf = ""
+            return []
+        channel = "reasoning" if self.state == "reasoning" else "message"
+        seg = [(channel, self.buf)]
+        self.buf = ""
+        return seg
+
+
+def _clean_command(command: str) -> str:
+    """Drop xninja's submission plumbing from a command shown to the user — the
+    ``echo <sentinel>`` the agent appends to signal completion."""
+    out_lines = []
+    for line in command.splitlines():
+        # strip a trailing ` && echo SENTINEL` / `; echo SENTINEL` / bare echo
+        line = re.sub(rf"\s*(&&|;)?\s*echo\s+['\"]?{re.escape(_SENTINEL)}['\"]?\s*$", "", line)
+        if line.strip():
+            out_lines.append(line)
+    return "\n".join(out_lines).strip()
+
+
+def make_json_emitter() -> Callable[[dict], None]:
+    """Render agent_loop events as structured JSONL (one object per line) so a
+    host (the katana runner/FE) shows reasoning, message, and command/output as
+    native streamed blocks instead of raw terminal text. Each line is an ``{"xn":
+    <kind>, …}`` object; inline ``<think>`` in the message channel becomes
+    reasoning."""
+    splitter = _ContentSplitter()
+
+    def out(obj: dict) -> None:
+        sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
+    def drain() -> None:
+        for ch, seg in splitter.flush():
+            if seg:
+                out({"xn": ch, "text": seg})
+
+    def emit(event: dict) -> None:
+        kind = event.get("type")
+        if kind == "token":
+            text = event.get("text") or ""
+            if (event.get("channel") or "content") == "reasoning":
+                out({"xn": "reasoning", "text": text})
+            else:
+                for ch, seg in splitter.feed(text):
+                    if seg:
+                        out({"xn": ch, "text": seg})
+        elif kind == "command":
+            drain()  # close any open block before the tool row
+            command = _clean_command(event.get("command") or "")
+            if command:  # skip a bare submission echo — it's plumbing, not an action
+                out({"xn": "command", "n": event.get("n"), "command": command})
+        elif kind == "result":
+            out({"xn": "result", "n": event.get("n"),
+                 "output": event.get("output") or "", "exit_code": event.get("exit_code", 0)})
+        elif kind == "phase":
+            drain()
+            out({"xn": "phase", "label": event.get("label") or ""})
+        elif kind == "notice":
+            drain()
+            out({"xn": "notice", "text": event.get("text") or ""})
+        elif kind == "status":
+            drain()
+            out({"xn": "status", "text": event.get("text") or ""})
+
+    return emit
+
+
 def start_working_spinner() -> Callable[[], None]:
     """Show a live elapsed-time status while the agent runs.
 
@@ -261,6 +398,7 @@ def add_run_options(parser: argparse.ArgumentParser, repo_help: str) -> None:
     parser.add_argument("--apply", action="store_true", help="apply the returned patch after preview")
     parser.add_argument("--raw-logs", action="store_true", help="show raw agent logs instead of the rendered transcript")
     parser.add_argument("--verbose", action="store_true", help="alias for --raw-logs")
+    parser.add_argument("--json", action="store_true", help="emit structured JSONL events for a host UI (reasoning/message/command/result)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -448,6 +586,7 @@ def run_task(
     apply_requested: bool,
     raw_logs: bool = False,
     color: ColorMode = "auto",
+    json_output: bool = False,
 ) -> int:
     repo_path = repo.expanduser().resolve()
     if not repo_path.exists():
@@ -473,19 +612,25 @@ def run_task(
     previous_color = os.environ.get("XNINJA_COLOR")
     os.environ["XNINJA_COLOR"] = color
     try:
-        section("xninja")
-        print(transcript_line("user", task))
-        print(transcript_line("model", model))
-        print(transcript_line("cwd", repo_path))
+        if not json_output:
+            section("xninja")
+            print(transcript_line("user", task))
+            print(transcript_line("model", model))
+            print(transcript_line("cwd", repo_path))
 
         # Stream the agent's work live (tokens, commands, results) so a long run
-        # shows progress instead of a silent spinner. `--raw-logs` opts back into
-        # the old buffered-at-the-end transcript for plain/deterministic output.
-        streaming = not raw_logs
-        on_event, printer_state = make_stream_printer() if streaming else (None, {})
+        # shows progress instead of a silent spinner. `--json` emits structured
+        # JSONL for a host UI; `--raw-logs` opts back into the buffered transcript.
+        streaming = not raw_logs and not json_output
+        if json_output:
+            on_event, printer_state = make_json_emitter(), {}
+        elif streaming:
+            on_event, printer_state = make_stream_printer()
+        else:
+            on_event, printer_state = None, {}
         if streaming:
             section("Transcript")
-        stop_spinner = (lambda: None) if streaming else start_working_spinner()
+        stop_spinner = (lambda: None) if (streaming or json_output) else start_working_spinner()
         try:
             with tempfile.TemporaryDirectory(prefix="xninja-agent-") as work_root:
                 work_repo = copy_repo_for_agent(repo_path, Path(work_root))
@@ -499,6 +644,18 @@ def run_task(
         patch = patch_text(result)
         logs = printable_agent_logs(result.get("logs"))
         message = result.get("message")
+        if json_output:
+            if message:
+                on_event({"type": "status", "text": message})
+            if not patch.strip():
+                on_event({"type": "notice", "text": "Agent returned no patch."})
+                return 1
+            if apply_requested:
+                applied = apply_patch(repo_path, patch)
+                if applied.returncode != 0:
+                    on_event({"type": "notice", "text": "Patch apply failed; no files changed."})
+                    return applied.returncode
+            return 0
         if streaming and printer_state.get("saw"):
             print()  # close the live transcript before the status line
         if message:
@@ -555,7 +712,7 @@ def interactive(args: argparse.Namespace) -> int:
                 return 0
             if not task:
                 continue
-            code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
+            code = run_task(Path(args.repo), task, args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color, json_output=args.json)
             if code not in {0, 1}:
                 return code
     finally:
@@ -592,10 +749,10 @@ def dispatch(args: argparse.Namespace) -> int:
         if args.agent_command == "update":
             return agent_update(args)
     if args.command in {"run", "exec", "e"}:
-        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
+        return run_task(Path(args.repo), " ".join(args.task), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color, json_output=args.json)
     prompt = getattr(args, "prompt", [])
     if prompt:
-        return run_task(Path(args.repo), " ".join(prompt), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color)
+        return run_task(Path(args.repo), " ".join(prompt), args.model, args.agent_ref, args.agent_path, args.apply, args.raw_logs or args.verbose, args.color, json_output=args.json)
     return interactive(args)
 
 
